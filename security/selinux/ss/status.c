@@ -61,7 +61,7 @@ struct page *selinux_kernel_status_page(void)
 #ifdef CONFIG_ALWAYS_ENFORCE
 			status->enforcing = 1;
 #else
-			status->enforcing = 0;
+			status->enforcing = selinux_enforcing;
 #endif
 			/*
 			 * NOTE: the next policyload event shall set
