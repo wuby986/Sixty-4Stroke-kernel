@@ -62,6 +62,12 @@ extern struct pm_qos_request exynos_isp_qos_int;
 extern struct pm_qos_request exynos_isp_qos_mem;
 extern struct pm_qos_request exynos_isp_qos_cam;
 extern struct pm_qos_request exynos_isp_qos_disp;
+extern bool force_caldata_dump;
+
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+static struct workqueue_struct *sensor_pwr_ctrl_wq = 0;
+#define CAMERA_WORKQUEUE_MAX_WAITING	1000
+#endif
 
 int fimc_is_companion_g_module(struct fimc_is_device_companion *device,
 	struct fimc_is_module_enum **module)
@@ -325,6 +331,36 @@ p_err:
 	return ret;
 }
 
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+static void sensor_pwr_ctrl(struct work_struct *work)
+{
+	int ret = 0;
+	struct exynos_platform_fimc_is_module *pdata;
+	struct fimc_is_module_enum *g_module = NULL;
+	struct fimc_is_core *core;
+
+	core = (struct fimc_is_core *)dev_get_drvdata(fimc_is_dev);
+	if (!core) {
+		err("core is NULL");
+		return;
+	}
+
+	ret = fimc_is_companion_g_module(&core->companion, &g_module);
+	if (ret) {
+		err("fimc_is_sensor_g_module is fail(%d)", ret);
+		return;
+	}
+
+	pdata = g_module->pdata;
+	ret = pdata->gpio_cfg(g_module->pdev, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE_SENSOR);
+	if (ret) {
+		err("gpio_cfg(sensor) is fail(%d)", ret);
+	}
+}
+
+static DECLARE_DELAYED_WORK(sensor_pwr_ctrl_work, sensor_pwr_ctrl);
+#endif
+
 static int fimc_is_companion_gpio_on(struct fimc_is_device_companion *device)
 {
 	int ret = 0;
@@ -337,6 +373,9 @@ static int fimc_is_companion_gpio_on(struct fimc_is_device_companion *device)
 	struct dcdc_power *dcdc;
 	const char *vout_str = NULL;
 	int vout = 0;
+#endif
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+	int waitWorkqueue;
 #endif
 
 	BUG_ON(!device);
@@ -394,6 +433,9 @@ static int fimc_is_companion_gpio_on(struct fimc_is_device_companion *device)
 		if (scenario == SENSOR_SCENARIO_NORMAL) {
 			if (GET_SENSOR_STATE(device->pdata->standby_state, SENSOR_STATE_COMPANION) == SENSOR_STATE_STANDBY) {
 				enable = GPIO_SCENARIO_STANDBY_DISABLE;
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+				queue_delayed_work(sensor_pwr_ctrl_wq, &sensor_pwr_ctrl_work, 0);
+#endif
 			}
 		}
 #endif
@@ -440,6 +482,28 @@ static int fimc_is_companion_gpio_on(struct fimc_is_device_companion *device)
 			err("Companion core_0.8v setting fail!");
 		}
 #endif /* CONFIG_COMPANION_DCDC_USE */
+
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+		if (enable == GPIO_SCENARIO_STANDBY_DISABLE) {
+			ret = pdata->gpio_cfg(module->pdev, scenario, GPIO_SCENARIO_STANDBY_DISABLE_COMPANION);
+			if (ret) {
+				clear_bit(FIMC_IS_MODULE_GPIO_ON, &module->state);
+				err("gpio_cfg(companion) is fail(%d)", ret);
+				goto p_err;
+			}
+
+			waitWorkqueue = 0;
+			/* Waiting previous workqueue */
+			while (work_busy(&sensor_pwr_ctrl_work.work) &&
+				waitWorkqueue < CAMERA_WORKQUEUE_MAX_WAITING) {
+				if (!(waitWorkqueue % 100))
+					info("Waiting Sensor power sequence...\n");
+				usleep_range(100, 100);
+				waitWorkqueue++;
+			}
+			info("workQueue is waited %d times\n", waitWorkqueue);
+		}
+#endif
 
 		ret = pdata->gpio_cfg(module->pdev, scenario, enable);
 		if (ret) {
@@ -724,6 +788,12 @@ static int fimc_is_companion_probe(struct platform_device *pdev)
 		goto p_err;
 	}
 
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+	if (!sensor_pwr_ctrl_wq) {
+		sensor_pwr_ctrl_wq = create_singlethread_workqueue("sensor_pwr_ctrl");
+	}
+#endif
+
 #if defined(CONFIG_PM_RUNTIME)
 	pm_runtime_enable(&pdev->dev);
 #endif
@@ -746,6 +816,13 @@ static int fimc_is_companion_remove(struct platform_device *pdev)
 	int ret = 0;
 
 	info("%s\n", __func__);
+
+#ifdef CAMERA_PARALLEL_RETENTION_SEQUENCE
+	if (sensor_pwr_ctrl_wq) {
+		destroy_workqueue(sensor_pwr_ctrl_wq);
+		sensor_pwr_ctrl_wq = NULL;
+	}
+#endif
 
 	return ret;
 }
@@ -945,18 +1022,22 @@ int fimc_is_companion_s_input(struct fimc_is_device_companion *device,
 	}
 
 	if (fimc_is_comp_is_valid(core) == 0) {
-#ifdef CONFIG_COMPANION_STANDBY_USE
-		if (GET_SENSOR_STATE(pdata->standby_state, SENSOR_STATE_COMPANION) == SENSOR_STATE_OFF) {
-			ret = fimc_is_comp_loadfirm(core);
-		} else {
-			ret = fimc_is_comp_retention(core);
-			if (ret == -EINVAL) {
-				info("companion restart..\n");
+#if defined(CONFIG_COMPANION_STANDBY_USE)
+		if (force_caldata_dump == false) {
+			if (GET_SENSOR_STATE(pdata->standby_state, SENSOR_STATE_COMPANION) == SENSOR_STATE_OFF) {
 				ret = fimc_is_comp_loadfirm(core);
+			} else {
+				ret = fimc_is_comp_retention(core);
+				if (ret == -EINVAL) {
+					info("companion restart..\n");
+					ret = fimc_is_comp_loadfirm(core);
+				}
 			}
+			SET_SENSOR_STATE(pdata->standby_state, SENSOR_STATE_COMPANION, SENSOR_STATE_ON);
+			info("%s: COMPANION STATE %u\n", __func__, GET_SENSOR_STATE(pdata->standby_state, SENSOR_STATE_COMPANION));
+		} else {
+			ret = fimc_is_comp_loadfirm(core);
 		}
-		SET_SENSOR_STATE(pdata->standby_state, SENSOR_STATE_COMPANION, SENSOR_STATE_ON);
-		info("%s: COMPANION STATE %u\n", __func__, GET_SENSOR_STATE(pdata->standby_state, SENSOR_STATE_COMPANION));
 #else
 		ret = fimc_is_comp_loadfirm(core);
 #endif

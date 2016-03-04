@@ -89,6 +89,11 @@ struct fts_touchkey fts_touchkeys[] = {
 };
 #endif
 
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+extern int tui_force_close(uint32_t arg);
+struct fts_ts_info *tui_tsp_info;
+#endif
+
 #ifdef CONFIG_GLOVE_TOUCH
 enum TOUCH_MODE {
 	FTS_TM_NORMAL = 0,
@@ -384,6 +389,10 @@ static void fts_set_cover_type(struct fts_ts_info *info, bool enable)
 		break;
 	case FTS_CLEAR_FLIP_COVER :
 		fts_enable_feature(info, FTS_FEATURE_COVER_CLEAR_FLIP, enable);
+		break;
+	case FTS_QWERTY_KEYBOARD_EUR :
+	case FTS_QWERTY_KEYBOARD_KOR :
+		fts_enable_feature(info, 0x0D, enable);
 		break;
 	case FTS_CHARGER_COVER:
 	case FTS_COVER_NOTHING1:
@@ -1845,6 +1854,9 @@ static int fts_setup_drv_data(struct i2c_client *client)
 			__func__, info->ddi_type ? "MAGNA" : "SDC", info->ddi_type);
 	}
 
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+	tui_tsp_info = info;
+#endif
 	return retval;
 }
 #ifdef CONFIG_BATTERY_SAMSUNG
@@ -2475,6 +2487,13 @@ void fts_release_all_finger(struct fts_ts_info *info)
 	input_sync(info->input_dev);
 }
 
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+void trustedui_mode_on(void){
+	tsp_debug_info(true, &tui_tsp_info->client->dev, "%s, release all finger..", __func__);
+	fts_release_all_finger(tui_tsp_info);
+}
+#endif
+
 #ifdef CONFIG_SEC_DEBUG_TSP_LOG
 static void dump_tsp_rawdata(struct work_struct *work)
 {
@@ -2542,6 +2561,22 @@ static int fts_stop_device(struct fts_ts_info *info)
 {
 	tsp_debug_info(true, &info->client->dev, "%s\n", __func__);
 
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+	if(TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()){
+		tsp_debug_err(true, &info->client->dev,
+			"%s TUI cancel event call!\n", __func__);	
+		fts_delay(100);
+		tui_force_close(1);
+		fts_delay(200);
+		if(TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()){
+			tsp_debug_err(true, &info->client->dev,
+				"%s TUI flag force clear!\n", __func__);
+			trustedui_clear_mask(TRUSTEDUI_MODE_VIDEO_SECURED|TRUSTEDUI_MODE_INPUT_SECURED);
+			trustedui_set_mode(TRUSTEDUI_MODE_OFF);
+		}
+	}
+#endif
+
 	mutex_lock(&info->device_mutex);
 
 	if (info->touch_stopped) {
@@ -2582,6 +2617,11 @@ static int fts_stop_device(struct fts_ts_info *info)
 #ifdef FTS_SUPPORT_NOISE_PARAM
 		fts_get_noise_param(info);
 #endif
+
+#ifdef FTS_SUPPORT_STRINGLIB
+		if (info->fts_mode)
+			fts_enable_feature(info, 0x0B, true);
+#endif
 	} else {
 		fts_interrupt_set(info, INT_DISABLE);
 		disable_irq(info->irq);
@@ -2613,6 +2653,22 @@ static int fts_start_device(struct fts_ts_info *info)
 {
 	tsp_debug_info(true, &info->client->dev, "%s %s\n",
 			__func__, info->lowpower_mode ? "exit low power mode" : "");
+
+#ifdef CONFIG_TRUSTONIC_TRUSTED_UI
+	if(TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()){
+		tsp_debug_err(true, &info->client->dev,
+			"%s TUI cancel event call!\n", __func__);
+		fts_delay(100);
+		tui_force_close(1);
+		fts_delay(200);
+		if(TRUSTEDUI_MODE_TUI_SESSION & trustedui_get_current_mode()){
+			tsp_debug_err(true, &info->client->dev,
+				"%s TUI flag force clear!\n", __func__);
+			trustedui_clear_mask(TRUSTEDUI_MODE_VIDEO_SECURED|TRUSTEDUI_MODE_INPUT_SECURED);
+			trustedui_set_mode(TRUSTEDUI_MODE_OFF);
+		}
+	}
+#endif
 
 	mutex_lock(&info->device_mutex);
 

@@ -20,6 +20,7 @@
 
 #include <mach/regs-clock.h>
 #include <mach/regs-pmu.h>
+#include <mach/pmu.h>
 #ifndef CONFIG_SOC_EXYNOS7580
 #include <mach/exynos-powermode.h>
 #else
@@ -44,6 +45,7 @@ extern u32 exynos_eint_to_pin_num(int eint);
 
 #if defined(CONFIG_SOC_EXYNOS7420)
 #define EXYNOS7420_EINT_PEND(b, x)	((b) + 0xA00 + (((x) >> 3) * 4))
+#define EXYNOS7420_EINT_MASK(b, x)	((b) + 0x900 + (((x) >> 3) * 4))
 
 static void exynos_show_wakeup_reason_eint(void)
 {
@@ -93,8 +95,24 @@ static void exynos_show_wakeup_registers(unsigned long wakeup_stat)
 			__raw_readl(EXYNOS7420_EINT_PEND(exynos_eint_base, 16)),
 			__raw_readl(EXYNOS7420_EINT_PEND(exynos_eint_base, 24)));
 }
+
+void exynos_show_eint_mask_registers(void)
+{
+    pr_info("EINT_MASK: 0x%02x, 0x%02x 0x%02x, 0x%02x\n",
+			__raw_readl(EXYNOS7420_EINT_MASK(exynos_eint_base, 0)),
+			__raw_readl(EXYNOS7420_EINT_MASK(exynos_eint_base, 8)),
+			__raw_readl(EXYNOS7420_EINT_MASK(exynos_eint_base, 16)),
+			__raw_readl(EXYNOS7420_EINT_MASK(exynos_eint_base, 24)));
+    pr_info("EINT_PEND: 0x%02x, 0x%02x 0x%02x, 0x%02x\n",
+			__raw_readl(EXYNOS7420_EINT_PEND(exynos_eint_base, 0)),
+			__raw_readl(EXYNOS7420_EINT_PEND(exynos_eint_base, 8)),
+			__raw_readl(EXYNOS7420_EINT_PEND(exynos_eint_base, 16)),
+			__raw_readl(EXYNOS7420_EINT_PEND(exynos_eint_base, 24)));
+}
 #else
 static void exynos_show_wakeup_registers(unsigned long wakeup_stat) {}
+
+void exynos_show_eint_mask_registers(void) {}
 #endif
 
 static void exynos_show_wakeup_reason(bool sleep_abort)
@@ -257,6 +275,29 @@ static struct sfr_save save_rcg[] = {
 };
 #endif
 
+static int check_powerstate_nonbootcpus(void)
+{
+	extern struct exynos_cpu_power_ops exynos_cpu;
+	extern struct cpumask hmp_slow_cpu_mask;
+	int cpu;
+	int ret = false;
+
+	for_each_cpu_and(cpu, cpu_possible_mask, &hmp_slow_cpu_mask) {
+		if (cpu == 0)
+			continue;
+		ret |= exynos_cpu.power_state(cpu);
+	}
+
+	return ret;
+}
+
+extern unsigned long *reference_current_freq;
+
+void print_current_clock(void)
+{
+	pr_info("[MIF] %luKhz\n", *reference_current_freq);
+}
+
 static int exynos_pm_enter(suspend_state_t state)
 {
 	int ret;
@@ -269,6 +310,10 @@ static int exynos_pm_enter(suspend_state_t state)
 	/* Save SFR list for RCG */
 	exynos_save_sfr(save_rcg, ARRAY_SIZE(save_rcg));
 #endif
+	do {
+		if (!check_powerstate_nonbootcpus())
+			break;
+	} while (true);
 
 #ifdef CONFIG_SEC_GPIO_DVS
 	/************************ Caution !!! ****************************/
@@ -278,6 +323,7 @@ static int exynos_pm_enter(suspend_state_t state)
 	/************************ Caution !!! ****************************/
 	gpio_dvs_check_sleepgpio();
 #endif
+	print_current_clock();
 
 	/* This will also act as our return point when
 	 * we resume as it saves its own register state and restores it

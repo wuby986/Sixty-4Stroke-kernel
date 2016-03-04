@@ -82,7 +82,7 @@ static int get_temp(void)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	filp = filp_open(TEMP_FILE_PATH, O_RDONLY,
+	filp = filp_open(TEMP_FILE_PATH, O_RDONLY | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(filp)) {
 		ret = PTR_ERR(filp);
@@ -220,7 +220,7 @@ void open_grip_caldata(struct ssp_data *data)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY,
+	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(cal_filp)) {
 		ret = PTR_ERR(cal_filp);
@@ -262,7 +262,7 @@ slope:
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cal_filp = filp_open(SLOPE_FILE_PATH, O_RDONLY,
+	cal_filp = filp_open(SLOPE_FILE_PATH, O_RDONLY | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(cal_filp)) {
 		ret = PTR_ERR(cal_filp);
@@ -298,7 +298,7 @@ temp:
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cal_filp = filp_open(TEMP_CAL_FILE_PATH, O_RDONLY,
+	cal_filp = filp_open(TEMP_CAL_FILE_PATH, O_RDONLY | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(cal_filp)) {
 		ret = PTR_ERR(cal_filp);
@@ -351,7 +351,7 @@ int set_grip_calibration(struct ssp_data *data, bool set)
 
 	if (!(data->uSensorState & (1 << GRIP_SENSOR))) {
 		pr_info("[SSP]: %s - Skip this function!!!\n"
-			"[SSP]: grip sensor is not connected(0x%x)\n",
+			"[SSP]: grip sensor is not connected(0x%llx)\n",
 			__func__, data->uSensorState);
 		return -EIO;
 	}
@@ -398,7 +398,7 @@ static int get_grip_calibration(struct ssp_data *data)
 
 	if (!(data->uSensorState & (1 << GRIP_SENSOR))) {
 		pr_info("[SSP]: %s - Skip this function!!!\n"
-			"[SSP]: grip sensor is not connected(0x%x)\n",
+			"[SSP]: grip sensor is not connected(0x%llx)\n",
 			__func__, data->uSensorState);
 		return -EIO;
 	}
@@ -443,7 +443,7 @@ static int get_grip_calibration(struct ssp_data *data)
 	set_fs(KERNEL_DS);
 
 	cal_filp = filp_open(TEMP_CAL_FILE_PATH,
-			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC,
+			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(cal_filp)) {
 		pr_err("[SSP]: %s - Can't open temp_cal file\n",
@@ -630,7 +630,7 @@ static int save_caldata(struct ssp_data *data)
 	set_fs(KERNEL_DS);
 
 	cal_filp = filp_open(CALIBRATION_FILE_PATH,
-			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC,
+			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(cal_filp)) {
 		pr_err("[SSP]: %s - Can't open calibration file\n",
@@ -934,7 +934,7 @@ static ssize_t slope_store(struct device *dev,
 	set_fs(KERNEL_DS);
 
 	cal_filp = filp_open(SLOPE_FILE_PATH,
-			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC,
+			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC | O_NOFOLLOW,
 			S_IRUGO | S_IWUSR | S_IWGRP);
 	if (IS_ERR(cal_filp)) {
 		pr_err("[SSP]: %s - Can't open slope file\n",

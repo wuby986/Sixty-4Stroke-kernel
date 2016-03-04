@@ -12,6 +12,14 @@
 #ifndef FIMC_IS_CONFIG_H
 #define FIMC_IS_CONFIG_H
 
+#if defined(CONFIG_CAMERA_ZERO) || defined(CONFIG_CAMERA_MARINE)
+#include "../vendor/fimc-is-vendor-config_zero.h"
+#elif defined(CONFIG_CAMERA_NOBLE) || defined(CONFIG_CAMERA_ZENLTE) || defined(CONFIG_CAMERA_VLTE)
+#include "../vendor/fimc-is-vendor-config_noble.h"
+#elif defined(CONFIG_CAMERA_ROYCE)
+#include "../vendor/fimc-is-vendor-config_royce.h"
+#endif
+
 /*
  * =================================================================================================
  * CONFIG - GLOBAL OPTIONS
@@ -77,7 +85,9 @@
 /* Post Processing Configruation */
 /* #define ENABLE_DRC */
 /* #define ENABLE_DIS */
+#if defined(CONFIG_ENABLE_TDNR)
 #define ENABLE_DNR
+#endif
 #define ENABLE_VRA
 
 #else
@@ -91,7 +101,7 @@
  * =================================================================================================
  */
 
-/* #define FW_SUSPEND_RESUME */
+#define FW_SUSPEND_RESUME
 #define ENABLE_CLOCK_GATE
 #define HAS_FW_CLOCK_GATE
 /* #define ENABLE_CACHE */

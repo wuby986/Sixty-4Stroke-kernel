@@ -21,7 +21,7 @@
  * software in any way with any other Broadcom software provided under a license
  * other than the GPL, without Broadcom's express prior written consent.
  *
- * $Id: dhd_pcie.c 539248 2015-03-06 04:50:53Z $
+ * $Id: dhd_pcie.c 607285 2015-12-18 11:18:53Z $
  */
 
 
@@ -61,6 +61,7 @@
 
 #define MEMBLOCK	2048		/* Block size used for downloading of dongle image */
 #define MAX_NVRAMBUF_SIZE	6144	/* max nvram buf size */
+#define MAX_WKLK_IDLE_CHECK	3	/* times wake_lock checked before deciding not to suspend */
 
 #define ARMCR4REG_BANKIDX	(0x40/sizeof(uint32))
 #define ARMCR4REG_BANKPDA	(0x4C/sizeof(uint32))
@@ -120,6 +121,10 @@ static int dhdpcie_download_code_array(dhd_bus_t *bus);
 
 
 
+#if defined(CUSTOMER_HW4) && defined(CONFIG_MACH_UNIVERSAL7420)
+extern void exynos_pcie_register_dump(int ch_num);
+#endif /* CUSTOMER_HW4 && CONFIG_MACH_UNIVERSAL7420 */
+
 #define     PCI_VENDOR_ID_BROADCOM          0x14e4
 
 /* IOVar table */
@@ -175,7 +180,7 @@ const bcm_iovar_t dhdpcie_iovars[] = {
 	{"pciecfgreg",	IOV_PCIECFGREG,	0,	IOVT_BUFFER,	2 * sizeof(int32) },
 	{"pciecorereg",	IOV_PCIECOREREG,	0,	IOVT_BUFFER,	2 * sizeof(int32) },
 	{"pcieserdesreg",	IOV_PCIESERDESREG,	0,	IOVT_BUFFER,	3 * sizeof(int32) },
-	{"bar0secwinreg",	IOV_BAR0_SECWIN_REG,	0,	IOVT_BUFFER,	2 * sizeof(int32) },
+	{"bar0secwinreg",	IOV_BAR0_SECWIN_REG,	0,	IOVT_BUFFER,	sizeof(sdreg_t) },
 	{"sbreg",	IOV_SBREG,	0,	IOVT_BUFFER,	sizeof(sdreg_t) },
 	{"pcie_dmaxfer",	IOV_PCIE_DMAXFER,	0,	IOVT_BUFFER,	3 * sizeof(int32) },
 	{"pcie_suspend", IOV_PCIE_SUSPEND,	0,	IOVT_UINT32,	0 },
@@ -291,6 +296,8 @@ dhd_bus_t* dhdpcie_bus_attach(osl_t *osh, volatile char* regs, volatile char* tc
 		bus->dhd->busstate = DHD_BUS_DOWN;
 		bus->db1_for_mb = TRUE;
 		bus->dhd->hang_report  = TRUE;
+
+		bus->d3_ack_war_cnt = 0;
 
 		DHD_TRACE(("%s: EXIT SUCCESS\n",
 			__FUNCTION__));
@@ -1424,6 +1431,7 @@ int dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 #if defined(DHD_DEBUG) && defined(CUSTOMER_HW4)
 		if (bus->dhd->memdump_enabled) {
 			/* write core dump to file */
+			bus->dhd->memdump_type = DUMP_TYPE_RESUMED_ON_TIMEOUT;
 			dhdpcie_mem_dump(bus);
 		}
 #endif /* DHD_DEBUG && CUSTOMER_HW4 */
@@ -1449,7 +1457,7 @@ int dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 	if (bus->dhd->rxcnt_timeout >= MAX_CNTL_RX_TIMEOUT) {
 #ifdef SUPPORT_LINKDOWN_RECOVERY
 #ifdef CONFIG_ARCH_MSM
-		bus->islinkdown = TRUE;
+		bus->no_cfg_restore = TRUE;
 #endif /* CONFIG_ARCH_MSM */
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 		return -ETIMEDOUT;
@@ -1458,7 +1466,7 @@ int dhd_bus_rxctl(struct dhd_bus *bus, uchar *msg, uint msglen)
 	if (bus->dhd->dongle_trap_occured) {
 #ifdef SUPPORT_LINKDOWN_RECOVERY
 #ifdef CONFIG_ARCH_MSM
-		bus->islinkdown = TRUE;
+		bus->no_cfg_restore = TRUE;
 #endif /* CONFIG_ARCH_MSM */
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 		return -EREMOTEIO;
@@ -1705,6 +1713,7 @@ dhdpcie_checkdied(dhd_bus_t *bus, char *data, uint size)
 			/* write core dump to file */
 #ifdef CUSTOMER_HW4
 			if (bus->dhd->memdump_enabled) {
+				bus->dhd->memdump_type = DUMP_TYPE_DONGLE_TRAP;
 #endif /* CUSTOMER_HW4 */
 				dhdpcie_mem_dump(bus);
 #ifdef CUSTOMER_HW4
@@ -1743,14 +1752,25 @@ dhdpcie_mem_dump(dhd_bus_t *bus)
 	int read_size = 0; /* Read size of each iteration */
 	uint8 *buf = NULL, *databuf = NULL;
 
+#if defined(CUSTOMER_HW4) && defined(CONFIG_MACH_UNIVERSAL7420)
+	exynos_pcie_register_dump(1);
+#endif /* CUSTOMER_HW4 && CONFIG_MACH_UNIVERSAL7420 */
+
+#ifdef SUPPORT_LINKDOWN_RECOVERY
+	if (bus->dhd->hang_reason == HANG_REASON_PCIE_LINK_DOWN) {
+		DHD_ERROR(("%s: PCIe link is down so skip\n", __FUNCTION__));
+		return BCME_ERROR;
+	}
+#endif /* SUPPORT_LINKDOWN_RECOVERY */
+
 	/* Get full mem size */
 	size = bus->ramsize;
-#ifdef USE_STATIC_MEMDUMP
+#if defined(CONFIG_DHD_USE_STATIC_BUF) && defined(DHD_USE_STATIC_MEMDUMP)
 	buf = DHD_OS_PREALLOC(bus->dhd, DHD_PREALLOC_MEMDUMP_BUF, size);
 	bzero(buf, size);
 #else
 	buf = MALLOC(bus->dhd->osh, size);
-#endif /* USE_STATIC_MEMDUMP */
+#endif /* CONFIG_DHD_USE_STATIC_BUF && DHD_USE_STATIC_MEMDUMP */
 	if (!buf) {
 		DHD_ERROR(("%s: Out of memory (%d bytes)\n", __FUNCTION__, size));
 		return BCME_ERROR;
@@ -1791,6 +1811,12 @@ int
 dhd_bus_mem_dump(dhd_pub_t *dhdp)
 {
 	dhd_bus_t *bus = dhdp->bus;
+
+	if (bus->suspended) {
+		DHD_ERROR(("%s: Bus is suspend so skip\n", __FUNCTION__));
+		return 0;
+	}
+
 	return dhdpcie_mem_dump(bus);
 }
 #endif /* DHD_DEBUG */
@@ -1866,7 +1892,9 @@ dhd_bus_schedule_queue(struct dhd_bus  *bus, uint16 flow_id, bool txs)
 {
 	flow_ring_node_t *flow_ring_node;
 	int ret = BCME_OK;
-
+#ifdef DHD_LOSSLESS_ROAMING
+	dhd_pub_t *dhdp = bus->dhd;
+#endif
 	DHD_INFO(("%s: flow_id is %d\n", __FUNCTION__, flow_id));
 	/* ASSERT on flow_id */
 	if (flow_id >= bus->max_sub_queues) {
@@ -1886,6 +1914,14 @@ dhd_bus_schedule_queue(struct dhd_bus  *bus, uint16 flow_id, bool txs)
 	}
 
 	flow_ring_node = DHD_FLOW_RING(bus->dhd, flow_id);
+
+#ifdef DHD_LOSSLESS_ROAMING
+	if ((dhdp->dequeue_prec_map & (1 << flow_ring_node->flow_info.tid)) == 0) {
+		DHD_INFO(("%s: tid %d is not in precedence map. block scheduling\n",
+			__FUNCTION__, flow_ring_node->flow_info.tid));
+		return BCME_OK;
+	}
+#endif /* DHD_LOSSLESS_ROAMING */
 
 	{
 		unsigned long flags;
@@ -2762,7 +2798,6 @@ dhd_bus_devreset(dhd_pub_t *dhdp, uint8 flag)
 				bus->dhd->busstate = DHD_BUS_DOWN;
 			} else {
 				if (bus->intr) {
-					dhdpcie_bus_intr_disable(bus);
 					dhdpcie_free_irq(bus);
 				}
 #ifdef BCMPCIE_OOB_HOST_WAKE
@@ -2935,55 +2970,59 @@ dhdpcie_bus_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, cons
 		bcopy(&int_val, arg, sizeof(int_val));
 		break;
 
-	case IOV_GVAL(IOV_BAR0_SECWIN_REG):
-	{
-		uint32 cur_base, base;
-		uchar *bar0;
-		volatile uint32 *offset;
-		/* set the bar0 secondary window to this */
-		/* write the register value */
-		cur_base = dhdpcie_bus_cfg_read_dword(bus, PCIE2_BAR0_CORE2_WIN, sizeof(uint));
-		base = int_val & 0xFFFFF000;
-		dhdpcie_bus_cfg_write_dword(bus, PCIE2_BAR0_CORE2_WIN,  sizeof(uint32), base);
-		bar0 = (uchar *)bus->regs;
-		offset = (uint32 *)(bar0 + 0x4000 + (int_val & 0xFFF));
-		int_val = *offset;
-		bcopy(&int_val, arg, val_size);
-		dhdpcie_bus_cfg_write_dword(bus, PCIE2_BAR0_CORE2_WIN, sizeof(uint32), cur_base);
-	}
-		break;
-	case IOV_SVAL(IOV_BAR0_SECWIN_REG):
-	{
-		uint32 cur_base, base;
-		uchar *bar0;
-		volatile uint32 *offset;
-		/* set the bar0 secondary window to this */
-		/* write the register value */
-		cur_base = dhdpcie_bus_cfg_read_dword(bus, PCIE2_BAR0_CORE2_WIN, sizeof(uint));
-		base = int_val & 0xFFFFF000;
-		dhdpcie_bus_cfg_write_dword(bus, PCIE2_BAR0_CORE2_WIN,  sizeof(uint32), base);
-		bar0 = (uchar *)bus->regs;
-		offset = (uint32 *)(bar0 + 0x4000 + (int_val & 0xFFF));
-		*offset = int_val2;
-		bcopy(&int_val2, arg, val_size);
-		dhdpcie_bus_cfg_write_dword(bus, PCIE2_BAR0_CORE2_WIN, sizeof(uint32), cur_base);
-	}
-		break;
-
 	case IOV_SVAL(IOV_PCIECOREREG):
 		si_corereg(bus->sih, bus->sih->buscoreidx, int_val, ~0, int_val2);
 		break;
-	case IOV_GVAL(IOV_SBREG):
+	case IOV_GVAL(IOV_BAR0_SECWIN_REG):
 	{
 		sdreg_t sdreg;
-		uint32 addr, coreidx;
+		uint32 addr, size;
 
 		bcopy(params, &sdreg, sizeof(sdreg));
 
 		addr = sdreg.offset;
-		coreidx =  (addr & 0xF000) >> 12;
+		size = sdreg.func;
 
-		int_val = si_corereg(bus->sih, coreidx, (addr & 0xFFF), 0, 0);
+		if (si_backplane_access(bus->sih, addr, size, &int_val, TRUE) != BCME_OK) {
+			DHD_ERROR(("Invalid size/addr combination \n"));
+			bcmerror = BCME_ERROR;
+			break;
+		}
+		bcopy(&int_val, arg, sizeof(int32));
+		break;
+	}
+
+	case IOV_SVAL(IOV_BAR0_SECWIN_REG):
+	{
+		sdreg_t sdreg;
+		uint32 addr, size;
+
+		bcopy(params, &sdreg, sizeof(sdreg));
+
+		addr = sdreg.offset;
+		size = sdreg.func;
+		if (si_backplane_access(bus->sih, addr, size, &sdreg.value, FALSE) != BCME_OK) {
+			DHD_ERROR(("Invalid size/addr combination \n"));
+			bcmerror = BCME_ERROR;
+		}
+		break;
+	}
+
+	case IOV_GVAL(IOV_SBREG):
+	{
+		sdreg_t sdreg;
+		uint32 addr, size;
+
+		bcopy(params, &sdreg, sizeof(sdreg));
+
+		addr = sdreg.offset;
+		size = sdreg.func;
+
+		if (si_backplane_access(bus->sih, addr, size, &int_val, TRUE) != BCME_OK) {
+			DHD_ERROR(("Invalid size/addr combination \n"));
+			bcmerror = BCME_ERROR;
+			break;
+		}
 		bcopy(&int_val, arg, sizeof(int32));
 		break;
 	}
@@ -2991,15 +3030,16 @@ dhdpcie_bus_doiovar(dhd_bus_t *bus, const bcm_iovar_t *vi, uint32 actionid, cons
 	case IOV_SVAL(IOV_SBREG):
 	{
 		sdreg_t sdreg;
-		uint32 addr, coreidx;
+		uint32 addr, size;
 
 		bcopy(params, &sdreg, sizeof(sdreg));
 
 		addr = sdreg.offset;
-		coreidx =  (addr & 0xF000) >> 12;
-
-		si_corereg(bus->sih, coreidx, (addr & 0xFFF), ~0, sdreg.value);
-
+		size = sdreg.func;
+		if (si_backplane_access(bus->sih, addr, size, &sdreg.value, FALSE) != BCME_OK) {
+			DHD_ERROR(("Invalid size/addr combination \n"));
+			bcmerror = BCME_ERROR;
+		}
 		break;
 	}
 
@@ -3401,6 +3441,9 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 		return BCME_OK;
 
 	if (state) {
+		int	idle_retry = 0;
+		int	active;
+
 		bus->wait_for_d3_ack = 0;
 		bus->suspended = TRUE;
 		DHD_GENERAL_LOCK(bus->dhd, flags);
@@ -3414,20 +3457,46 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 		}
 		DHD_GENERAL_UNLOCK(bus->dhd, flags);
 		DHD_OS_WAKE_LOCK_WAIVE(bus->dhd);
-		dhd_os_set_ioctl_resp_timeout(DEFAULT_IOCTL_RESP_TIMEOUT);
+		dhd_os_set_ioctl_resp_timeout(D3_ACK_RESP_TIMEOUT);
 		dhdpcie_send_mb_data(bus, H2D_HOST_D3_INFORM);
 		timeleft = dhd_os_d3ack_wait(bus->dhd, &bus->wait_for_d3_ack, &pending);
 		dhd_os_set_ioctl_resp_timeout(IOCTL_RESP_TIMEOUT);
 		DHD_OS_WAKE_LOCK_RESTORE(bus->dhd);
+
+		/* To allow threads that got pre-empted to complete.
+		*/
+		while ((active = dhd_os_check_wakelock_all(bus->dhd)) &&
+			(idle_retry < MAX_WKLK_IDLE_CHECK)) {
+			msleep(1);
+			idle_retry++;
+		}
+
 		if (bus->wait_for_d3_ack) {
 			/* Got D3 Ack. Suspend the bus */
-			if (!bus->force_suspend && dhd_os_check_wakelock_all(bus->dhd)) {
-				DHD_ERROR(("Suspend failed because of wakelock\n"));
+			if (!bus->force_suspend && active) {
+				DHD_ERROR(("%s():Suspend failed because of wakelock restoring "
+					"Dongle to D0\n", __FUNCTION__));
 #ifdef DHD_USE_IDLECOUNT
 				if (bus->host_suspend == TRUE) {
 					bus->host_suspend = FALSE;
 				}
 #endif /* DHD_USE_IDLECOUNT */
+				/*
+				 * Dongle still thinks that it has to be in D3 state
+				 * until gets a D0 Inform, but we are backing off from suspend.
+				 * Ensure that Dongle is brought back to D0.
+				 *
+				 * Bringing back Dongle from D3 Ack state to D0 state
+				 * is a 2 step process. Dongle would want to know that D0 Inform
+				 * would be sent as a MB interrupt
+				 * to bring it out of D3 Ack state to D0 state.
+				 * So we have to send both this message.
+				 */
+				DHD_OS_WAKE_LOCK_WAIVE(bus->dhd);
+				dhdpcie_send_mb_data(bus,
+					(H2D_HOST_D0_INFORM_IN_USE | H2D_HOST_D0_INFORM));
+				DHD_OS_WAKE_LOCK_RESTORE(bus->dhd);
+
 				bus->suspended = FALSE;
 				DHD_GENERAL_LOCK(bus->dhd, flags);
 				bus->dhd->busstate = DHD_BUS_DATA;
@@ -3446,6 +3515,9 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 #endif /* DHD_USE_IDLECOUNT */
 			}
 			bus->dhd->d3ackcnt_timeout = 0;
+#if defined(BCMPCIE_OOB_HOST_WAKE)
+			dhdpcie_oob_intr_set(bus, TRUE);
+#endif /* BCMPCIE_OOB_HOST_WAKE */
 		} else if (timeleft == 0) {
 			bus->dhd->d3ackcnt_timeout++;
 			DHD_ERROR(("%s: resumed on timeout for D3 ACK d3_inform_cnt %d \n",
@@ -3453,6 +3525,7 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 #if defined(DHD_DEBUG) && defined(CUSTOMER_HW4)
 			if (bus->dhd->memdump_enabled) {
 				/* write core dump to file */
+				bus->dhd->memdump_type = DUMP_TYPE_D3_ACK_TIMEOUT;
 				dhdpcie_mem_dump(bus);
 			}
 #endif /* DHD_DEBUG && CUSTOMER_HW4 */
@@ -3470,7 +3543,7 @@ dhdpcie_bus_suspend(struct dhd_bus *bus, bool state)
 					"due to PCIe linkdown\n", __FUNCTION__));
 #ifdef SUPPORT_LINKDOWN_RECOVERY
 #ifdef CONFIG_ARCH_MSM
-				bus->islinkdown = TRUE;
+				bus->no_cfg_restore = TRUE;
 #endif /* CONFIG_ARCH_MSM */
 #endif /* SUPPORT_LINKDOWN_RECOVERY */
 				dhd_os_check_hang(bus->dhd, 0, -ETIMEDOUT);
@@ -3929,6 +4002,7 @@ void dhd_bus_dump(dhd_pub_t *dhdp, struct bcmstrbuf *strbuf)
 	bcm_bprintf(strbuf, "D3 inform cnt %d\n", dhdp->bus->d3_inform_cnt);
 	bcm_bprintf(strbuf, "D0 inform cnt %d\n", dhdp->bus->d0_inform_cnt);
 	bcm_bprintf(strbuf, "D0 inform in use cnt %d\n", dhdp->bus->d0_inform_in_use_cnt);
+	bcm_bprintf(strbuf, "D3 Ack WAR cnt %d\n", dhdp->bus->d3_ack_war_cnt);
 }
 
 static void
@@ -4532,6 +4606,9 @@ int dhd_bus_init(dhd_pub_t *dhdp, bool enforce_mutex)
 	init_waitqueue_head(&bus->rpm_queue);
 	mutex_init(&bus->pm_lock);
 #endif /* DHD_USE_IDLECOUNT */
+
+	bus->d3_ack_war_cnt = 0;
+
 	return ret;
 
 }

@@ -1,7 +1,7 @@
 /*
  * Customer HW 4 dependant file
  *
- * Copyright (C) 1999-2015, Broadcom Corporation
+ * Copyright (C) 1999-2016, Broadcom Corporation
  * 
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -68,6 +68,10 @@
 #define READ_MACADDR
 #endif  /* CONFIG_WIFI_BROADCOM_COB */
 
+#if defined(CONFIG_WIFI_BROADCOM_COB) && defined(CONFIG_BCMDHD_PCIE)
+#define OTP_WRITE_ON
+#endif /* CONFIG_WIFI_BROADCOM_COB && CONFIG_BCMDHD_PCIE */
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0)) && (defined(CONFIG_BCM4334) || \
 	defined(CONFIG_BCM4334_MODULE))
 #define RXFRAME_THREAD
@@ -75,7 +79,7 @@
 
 #if defined(CONFIG_SEC_TRLTE_PROJECT) || defined(CONFIG_SEC_TBLTE_PROJECT)
 #define SUPPORT_MULTIPLE_BOARD_REV
-#endif /* CONFIG_SEC_TRLTE_PROJECT  || defined(CONFIG_SEC_TBLTE_PROJECT)*/
+#endif /* CONFIG_SEC_TRLTE_PROJECT  || defined(CONFIG_SEC_TBLTE_PROJECT) */
 
 #if defined(CONFIG_MACH_UNIVERSAL7420) || defined(CONFIG_ARCH_MSM8994)
 #define SUPPORT_MULTIPLE_MODULE_CIS
@@ -89,6 +93,10 @@
 #endif /* CONFIG_MACH_SAMSUNG_ESPRESSO && CONFIG_MACH_SAMSUNG_ESPRESSO_10 */
 
 #if defined(CONFIG_MACH_UNIVERSAL5433) || defined(CONFIG_MACH_UNIVERSAL7420)
+#define USE_EXYNOS_PCIE_RC_PMPATCH
+#endif /* CONFIG_MACH_UNIVERSAL5433 || CONFIG_MACH_UNIVERSAL7420 */
+
+#if defined(CONFIG_MACH_UNIVERSAL5433) || defined(CONFIG_MACH_UNIVERSAL7420)
 #undef CUSTOM_SET_CPUCORE
 #define PRIMARY_CPUCORE 0
 #define DPC_CPUCORE 4
@@ -96,6 +104,12 @@
 #define TASKLET_CPUCORE 5
 #define ARGOS_CPU_SCHEDULER
 #define ARGOS_RPS_CPU_CTL
+#elif defined(CONFIG_MACH_UNIVERSAL7580) && defined(CONFIG_BCM43455)
+#define CUSTOM_SET_CPUCORE
+#define PRIMARY_CPUCORE 0
+#define MAX_RETRY_SET_CPUCORE 5
+#define DPC_CPUCORE 1
+#define RXF_CPUCORE 2
 #elif defined(CONFIG_MACH_HL3G) || defined(CONFIG_MACH_HLLTE) || \
 	defined(CONFIG_MACH_UNIVERSAL5422) || defined(CONFIG_MACH_UNIVERSAL5430)
 #define CUSTOM_SET_CPUCORE
@@ -205,7 +219,6 @@
 
 #if (CONFIG_WLAN_REGION_CODE == 202) /* KTT */
 #define VLAN_MODE_OFF
-#define CUSTOM_KEEP_ALIVE_SETTING	30000
 #define FULL_ROAMING_SCAN_PERIOD_60_SEC
 
 #ifdef CONFIG_MACH_UNIVERSAL5410

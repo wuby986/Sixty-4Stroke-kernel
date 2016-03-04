@@ -37,6 +37,8 @@ obj-$(CONFIG_VIDEO_EXYNOS_FIMC_IS)	+= setup-fimc-is-sensor.o
 obj-$(CONFIG_VIDEO_EXYNOS_FIMC_IS)	+= setup-fimc-is-module.o
 obj-$(CONFIG_COMPANION_USE)		+= setup-fimc-is-companion.o
 
+obj-$(CONFIG_SOC_EXYNOS7420)	+= exynos-smc.o
+
 # device support
 
 obj-$(CONFIG_EXYNOS5_SETUP_MIPIPHY)	+= setup-exynos5-mipiphy.o

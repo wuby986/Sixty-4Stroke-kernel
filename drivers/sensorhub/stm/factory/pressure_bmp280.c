@@ -14,8 +14,13 @@
  */
 #include "../ssp.h"
 
+#define BOSCH_ID	0
 #define	VENDOR		"BOSCH"
 #define	CHIP_ID		"BMP280"
+
+#define STM_ID		1
+#define VENDOR_STM	"STM"
+#define CHIP_ID_STM	"LPS25H"
 
 #define CALIBRATION_FILE_PATH		"/efs/FactoryApp/baro_delta"
 
@@ -53,7 +58,7 @@ int pressure_open_calibration(struct ssp_data *data)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0666);
+	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0660);
 	if (IS_ERR(cal_filp)) {
 		iErr = PTR_ERR(cal_filp);
 		if (iErr != -ENOENT)
@@ -149,13 +154,37 @@ static ssize_t eeprom_check_show(struct device *dev,
 static ssize_t pressure_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%s\n", VENDOR);
+	struct ssp_data *data = dev_get_drvdata(dev);
+
+	if (data->pressure_type == STM_ID)
+		return sprintf(buf, "%s\n", VENDOR_STM);
+	else
+		return sprintf(buf, "%s\n", VENDOR);
 }
 
 static ssize_t pressure_name_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%s\n", CHIP_ID);
+	struct ssp_data *data = dev_get_drvdata(dev);
+
+	if (data->pressure_type == STM_ID)
+		return sprintf(buf, "%s\n", CHIP_ID_STM);
+	else
+		return sprintf(buf, "%s\n", CHIP_ID);
+}
+
+static ssize_t pressure_temperature_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	s32 temperature = 0;
+	s32 float_temperature = 0;
+	s32 temp = 0;
+	temp = (s32) (data->buf[PRESSURE_SENSOR].temperature);
+	temperature = ((temp / 100)*100); // (temperature/(100));
+	float_temperature = ((temperature%100) > 0 ? (temperature%100) : -(temperature%100));
+	
+	return sprintf(buf, "%d.%02d\n", (temperature/100), float_temperature);
 }
 
 static DEVICE_ATTR(vendor,  S_IRUGO, pressure_vendor_show, NULL);
@@ -165,6 +194,7 @@ static DEVICE_ATTR(calibration,  S_IRUGO | S_IWUSR | S_IWGRP,
 	pressure_cabratioin_show, pressure_cabratioin_store);
 static DEVICE_ATTR(sea_level_pressure, S_IWUSR | S_IWGRP,
 	NULL, sea_level_pressure_store);
+static DEVICE_ATTR(temperature, S_IRUGO, pressure_temperature_show, NULL);
 
 static struct device_attribute *pressure_attrs[] = {
 	&dev_attr_vendor,
@@ -172,6 +202,7 @@ static struct device_attribute *pressure_attrs[] = {
 	&dev_attr_calibration,
 	&dev_attr_sea_level_pressure,
 	&dev_attr_eeprom_check,
+	&dev_attr_temperature,
 	NULL,
 };
 

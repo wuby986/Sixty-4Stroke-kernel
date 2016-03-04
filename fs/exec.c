@@ -66,6 +66,10 @@
 
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_RKP_KDP
+#define rkp_is_nonroot(x) ((x->cred->type)>>1 & 1)
+#endif /*CONFIG_RKP_KDP*/
+
 int suid_dumpable = 0;
 
 static LIST_HEAD(formats);
@@ -1083,8 +1087,9 @@ int flush_old_exec(struct linux_binprm * bprm)
 	if (retval)
 		goto out;
 #ifdef CONFIG_RKP_KDP
-	if(rkp_cred_enable)
+	if(rkp_cred_enable){
 		rkp_call(RKP_CMDID(0x43),(unsigned long long)current_cred(), (unsigned long long)bprm->mm->pgd,0,0,0);
+	}
 #endif /*CONFIG_RKP_KDP*/
 
 	bprm->mm = NULL;		/* We're using it now */
@@ -1269,6 +1274,53 @@ static int check_unsafe_exec(struct linux_binprm *bprm)
 	return res;
 }
 
+static void bprm_fill_uid(struct linux_binprm *bprm)
+{
+	struct inode *inode;
+	unsigned int mode;
+	kuid_t uid;
+	kgid_t gid;
+
+	/* clear any previous set[ug]id data from a previous binary */
+	bprm->cred->euid = current_euid();
+	bprm->cred->egid = current_egid();
+
+	if (bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID)
+		return;
+
+	if (task_no_new_privs(current))
+		return;
+
+	inode = file_inode(bprm->file);
+	mode = ACCESS_ONCE(inode->i_mode);
+	if (!(mode & (S_ISUID|S_ISGID)))
+		return;
+
+	/* Be careful if suid/sgid is set */
+	mutex_lock(&inode->i_mutex);
+
+	/* reload atomically mode/uid/gid now that lock held */
+	mode = inode->i_mode;
+	uid = inode->i_uid;
+	gid = inode->i_gid;
+	mutex_unlock(&inode->i_mutex);
+
+	/* We ignore suid/sgid if there are no mappings for them in the ns */
+	if (!kuid_has_mapping(bprm->cred->user_ns, uid) ||
+		 !kgid_has_mapping(bprm->cred->user_ns, gid))
+		return;
+
+	if (mode & S_ISUID) {
+		bprm->per_clear |= PER_CLEAR_ON_SETID;
+		bprm->cred->euid = uid;
+	}
+
+	if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
+		bprm->per_clear |= PER_CLEAR_ON_SETID;
+		bprm->cred->egid = gid;
+	}
+}
+
 /* 
  * Fill the binprm structure from the inode. 
  * Check permissions, then read the first 128 (BINPRM_BUF_SIZE) bytes
@@ -1277,39 +1329,12 @@ static int check_unsafe_exec(struct linux_binprm *bprm)
  */
 int prepare_binprm(struct linux_binprm *bprm)
 {
-	umode_t mode;
-	struct inode * inode = file_inode(bprm->file);
 	int retval;
 
-	mode = inode->i_mode;
 	if (bprm->file->f_op == NULL)
 		return -EACCES;
 
-	/* clear any previous set[ug]id data from a previous binary */
-	bprm->cred->euid = current_euid();
-	bprm->cred->egid = current_egid();
-
-	if (!(bprm->file->f_path.mnt->mnt_flags & MNT_NOSUID) &&
-	    !task_no_new_privs(current) &&
-	    kuid_has_mapping(bprm->cred->user_ns, inode->i_uid) &&
-	    kgid_has_mapping(bprm->cred->user_ns, inode->i_gid)) {
-		/* Set-uid? */
-		if (mode & S_ISUID) {
-			bprm->per_clear |= PER_CLEAR_ON_SETID;
-			bprm->cred->euid = inode->i_uid;
-		}
-
-		/* Set-gid? */
-		/*
-		 * If setgid is set but no group execute bit then this
-		 * is a candidate for mandatory locking, not a setgid
-		 * executable.
-		 */
-		if ((mode & (S_ISGID | S_IXGRP)) == (S_ISGID | S_IXGRP)) {
-			bprm->per_clear |= PER_CLEAR_ON_SETID;
-			bprm->cred->egid = inode->i_gid;
-		}
-	}
+	bprm_fill_uid(bprm);
 
 	/* fill in binprm security blob */
 	retval = security_bprm_set_creds(bprm);
@@ -1512,6 +1537,25 @@ out_nofile:
 }
 EXPORT_SYMBOL(sec_check_execpath);
 
+#ifdef CONFIG_RKP_KDP
+static int rkp_restrict_fork(void)
+{
+	struct cred *shellcred;
+
+	if(rkp_is_nonroot(current)){
+		shellcred = prepare_creds();
+		if (!shellcred) {
+			return 1;
+		}
+		shellcred->uid = 2000;
+		shellcred->gid = 2000;
+		shellcred->euid = 2000;
+		shellcred->egid = 2000;
+		commit_creds(shellcred);
+	}
+	return 0;
+}
+#endif /*CONFIG_RKP_KDP*/
 static int sec_restrict_fork(void)
 {
 	struct cred *shellcred;
@@ -1817,7 +1861,11 @@ SYSCALL_DEFINE3(execve,
 	struct filename *path = getname(filename);
 	int error = PTR_ERR(path);
 	if (!IS_ERR(path)) {
-
+#ifdef CONFIG_RKP_KDP
+		if(rkp_cred_enable){
+			rkp_call(RKP_CMDID(0x4b),(u64)path->name,0,0,0,0);
+		}
+#endif
 #if defined CONFIG_SEC_RESTRICT_FORK
 		if(CHECK_ROOT_UID(current)){
 			if(sec_restrict_fork()){
@@ -1828,8 +1876,18 @@ SYSCALL_DEFINE3(execve,
 				return -EACCES;
 			}
 		}
+#ifdef CONFIG_RKP_KDP
+		if(CHECK_ROOT_UID(current) && rkp_cred_enable) {
+			if(rkp_restrict_fork()){
+				PRINT_LOG("RKP_KDP Restricted making process. PID = %d(%s) "
+								"PPID = %d(%s)\n",
+				current->pid, current->comm,
+				current->parent->pid, current->parent->comm);
+				return -EACCES;
+			}
+		}
+#endif
 #endif	// End of CONFIG_SEC_RESTRICT_FORK
-
 		error = do_execve(path->name, argv, envp);
 		putname(path);
 	}

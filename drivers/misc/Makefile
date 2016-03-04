@@ -54,6 +54,7 @@ obj-$(CONFIG_INTEL_MEI)		+= mei/
 obj-$(CONFIG_VMWARE_VMCI)	+= vmw_vmci/
 obj-$(CONFIG_LATTICE_ECP3_CONFIG)	+= lattice-ecp3-config.o
 obj-$(CONFIG_SRAM)		+= sram.o
+obj-$(CONFIG_UID_CPUTIME) += uid_cputime.o
 obj-$(CONFIG_SCHED_HMP)		+= cci400.o
 obj-$(CONFIG_MIPI_LLI)		+= mipi-lli/
 obj-$(CONFIG_SEC_MODEM_V1)	+= modem_v1/
@@ -67,12 +68,18 @@ obj-$(CONFIG_FM_RADIO)		+= samsung/
 # Secure OS Mobicore Interface
 obj-$(CONFIG_MOBICORE_DRIVER)  += tzic64.o
 
+# BlowFish
+obj-$(CONFIG_TZDEV)		+= tzdev/
+
 ifeq ($(TIMA_ENABLED),1)
 obj-$(CONFIG_TIMA_LOG)		+= tima_debug_log.o
 endif
 
 # SS/DS
 obj-$(CONFIG_CHECK_SIMSLOT_COUNT) += sim_slot.o
+
+# GPIO_DETECT
+obj-$(CONFIG_CHECK_GPIO_DETECT) += gpio_detect.o
 
 # for DMVerity
 obj-$(CONFIG_DM_VERITY)		+= dmverity_query.o

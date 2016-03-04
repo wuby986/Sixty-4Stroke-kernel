@@ -106,7 +106,7 @@ config SND_SOC_ESXXX_SEAMLESS_VOICE_WAKEUP
 
 config SND_SOC_ESXXX_RESTORE_STD_FW
 	tristate "Restore standard firmware"
-	default n
+	default y
 	---help---
 	Restore standard fw if earSmart chip did not respond.
 	sometimes, audience chip did not respond.
@@ -126,4 +126,16 @@ config SND_SOC_ESXXX_VEQ_EXTENDEDVOLUME
 	---help---
 	Change Max Volume Index to Eight
 	Otherwise default is Six Step
+
+config SND_SOC_ESXXX_UPDATE_VEQ_TABLE
+	tristate "Update VEQ Table"
+	default n
+	---help---
+	support to update the veq table during the boot
+
+config SND_SOC_ES_STREAM_FS_STORER
+	tristate "Store Steaming data into file"
+	default n
+	---help---
+	Enable support of storing streaming data into file
 endmenu

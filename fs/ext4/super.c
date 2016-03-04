@@ -390,6 +390,8 @@ static void ext4_journal_commit_callback(journal_t *journal, transaction_t *txn)
 
 static void ext4_handle_error(struct super_block *sb, char* buf)
 {
+	print_debug_bdinfo(sb);
+
 	if (sb->s_flags & MS_RDONLY)
 		return;
 
@@ -1180,6 +1182,7 @@ enum {
 	Opt_dioread_nolock, Opt_dioread_lock,
 	Opt_discard, Opt_nodiscard, Opt_init_itable, Opt_noinit_itable,
 	Opt_max_dir_size_kb,
+	Opt_debug_bdinfo,
 };
 
 static const match_table_t tokens = {
@@ -1259,6 +1262,7 @@ static const match_table_t tokens = {
 	{Opt_removed, "reservation"},	/* mount option from ext2/3 */
 	{Opt_removed, "noreservation"}, /* mount option from ext2/3 */
 	{Opt_removed, "journal=%u"},	/* mount option from ext2/3 */
+	{Opt_debug_bdinfo, "debug_bdinfo"},
 	{Opt_err, NULL},
 };
 
@@ -1450,6 +1454,7 @@ static const struct mount_opts {
 	{Opt_jqfmt_vfsv0, QFMT_VFS_V0, MOPT_QFMT},
 	{Opt_jqfmt_vfsv1, QFMT_VFS_V1, MOPT_QFMT},
 	{Opt_max_dir_size_kb, 0, MOPT_GTE0},
+	{Opt_debug_bdinfo, EXT4_MOUNT_DEBUG_BDINFO, MOPT_SET},
 	{Opt_err, 0, 0}
 };
 
@@ -2464,6 +2469,25 @@ static ssize_t lifetime_write_kbytes_show(struct ext4_attr *a,
 			  EXT4_SB(sb)->s_sectors_written_start) >> 1)));
 }
 
+static ssize_t r_blocks_count_show(struct ext4_attr *a,
+		struct ext4_sb_info *sbi, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%llu\n",
+			(unsigned long long) atomic64_read(&sbi->s_r_blocks_count));
+}
+
+static ssize_t r_blocks_count_store(struct ext4_attr *a,
+		struct ext4_sb_info *sbi, const char *buf, size_t count)
+{
+	unsigned long long val;
+
+	if (parse_strtoull(buf, -1ULL, &val))
+		return -EINVAL;
+	atomic64_set(&sbi->s_r_blocks_count, val);
+
+	return count;
+}
+
 static ssize_t inode_readahead_blks_store(struct ext4_attr *a,
 					  struct ext4_sb_info *sbi,
 					  const char *buf, size_t count)
@@ -2563,6 +2587,7 @@ static struct ext4_attr ext4_attr_##name = __ATTR(name, mode, show, store)
 EXT4_RO_ATTR(delayed_allocation_blocks);
 EXT4_RO_ATTR(session_write_kbytes);
 EXT4_RO_ATTR(lifetime_write_kbytes);
+EXT4_RW_ATTR(r_blocks_count);
 EXT4_RW_ATTR(reserved_clusters);
 EXT4_ATTR_OFFSET(inode_readahead_blks, 0644, sbi_ui_show,
 		 inode_readahead_blks_store, s_inode_readahead_blks);
@@ -2581,6 +2606,7 @@ static struct attribute *ext4_attrs[] = {
 	ATTR_LIST(delayed_allocation_blocks),
 	ATTR_LIST(session_write_kbytes),
 	ATTR_LIST(lifetime_write_kbytes),
+	ATTR_LIST(r_blocks_count),
 	ATTR_LIST(reserved_clusters),
 	ATTR_LIST(inode_readahead_blks),
 	ATTR_LIST(inode_goal),
@@ -3301,6 +3327,58 @@ static int ext4_reserve_clusters(struct ext4_sb_info *sbi, ext4_fsblk_t count)
 	return 0;
 }
 
+void print_debug_bdinfo(struct super_block *sb)
+{
+	if (test_opt(sb, DEBUG_BDINFO)) {
+		struct ext4_sb_info *sbi = EXT4_SB(sb);
+		struct tm tm;
+		char now[16] = {0, };
+
+		time_to_tm(get_seconds(), 0, &tm);
+		sprintf(now, "%04ld%02d%02d%02d%02d%02d",
+			tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+			tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+		ext4_msg(sb, KERN_INFO, "bd reset count=%d, time=%s, now=%s",
+				sbi->s_bd_reset_cnt, sbi->s_bd_reset_time,
+				now);
+	}
+}
+
+void ext4_bd_reset_callback_fn(struct block_device *bdev)
+{
+	struct block_device *whole = bdev->bd_contains;
+	struct block_device *tmp;
+	struct disk_part_iter piter;
+	struct hd_struct *part;
+	struct ext4_sb_info *sbi;
+	struct super_block *sb;
+	struct tm tm;
+
+	disk_part_iter_init(&piter, whole->bd_disk, DISK_PITER_REVERSE);
+	while ((part = disk_part_iter_next(&piter))) {
+		tmp = bdget_disk(whole->bd_disk, part->partno);
+		if (tmp && tmp->bd_private ==
+				(unsigned long) whole->bd_fscallback_func)
+			break;
+	}
+
+	if (!part || !tmp->bd_super)
+		return;
+
+	sb = tmp->bd_super;
+	sbi = EXT4_SB(sb);
+
+	sbi->s_bd_reset_cnt++;
+	time_to_tm(get_seconds(), 0, &tm);
+	sprintf(sbi->s_bd_reset_time, "%04ld%02d%02d%02d%02d%02d",
+			tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+			tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	ext4_warning(sb, "bd reset arisen count=%d time=%s",
+			sbi->s_bd_reset_cnt, sbi->s_bd_reset_time);
+}
+
 static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 {
 	char *orig_data = kstrdup(data, GFP_KERNEL);
@@ -3778,6 +3856,19 @@ static int ext4_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed_mount;
 	}
 
+	if (test_opt(sb, DEBUG_BDINFO)) {
+		struct block_device *whole = sb->s_bdev->bd_contains;
+
+		whole->bd_fscallback_func = ext4_bd_reset_callback_fn;
+		sb->s_bdev->bd_private = 
+			(unsigned long) whole->bd_fscallback_func;
+
+		sbi->s_bd_reset_cnt = le32_to_cpu(es->s_bd_reset_cnt);
+		strncpy(sbi->s_bd_reset_time, es->s_bd_reset_time, 16);
+
+		print_debug_bdinfo(sb);
+	}
+
 	if (ext4_proc_root)
 		sbi->s_proc = proc_mkdir(sb->s_id, ext4_proc_root);
 
@@ -4029,6 +4120,8 @@ no_journal:
 		ext4_msg(sb, KERN_INFO, "required extra inode space not"
 			 "available");
 	}
+
+	atomic64_set(&sbi->s_r_blocks_count, ext4_r_blocks_count(es));
 
 	err = ext4_reserve_clusters(sbi, ext4_calculate_resv_clusters(sb));
 	if (err) {
@@ -4476,11 +4569,18 @@ static int ext4_commit_super(struct super_block *sb, int sync)
 	es->s_free_inodes_count =
 		cpu_to_le32(percpu_counter_sum_positive(
 				&EXT4_SB(sb)->s_freeinodes_counter));
+
+	if (test_opt(sb, DEBUG_BDINFO)) {
+		es->s_bd_reset_cnt = cpu_to_le32(EXT4_SB(sb)->s_bd_reset_cnt);
+		strncpy(es->s_bd_reset_time, EXT4_SB(sb)->s_bd_reset_time,
+				16);
+	}
+
 	BUFFER_TRACE(sbh, "marking dirty");
 	ext4_superblock_csum_set(sb);
 	mark_buffer_dirty(sbh);
 	if (sync) {
-		error = sync_dirty_buffer(sbh);
+		error = __sync_dirty_buffer(sbh, WRITE_FUA);
 		if (error)
 			return error;
 
@@ -4909,8 +5009,8 @@ static int ext4_statfs(struct dentry *dentry, struct kstatfs *buf)
 	/* prevent underflow in case that few free space is available */
 	buf->f_bfree = EXT4_C2B(sbi, max_t(s64, bfree, 0));
 	buf->f_bavail = buf->f_bfree -
-			(ext4_r_blocks_count(es) + resv_blocks);
-	if (buf->f_bfree < (ext4_r_blocks_count(es) + resv_blocks))
+			(atomic64_read(&sbi->s_r_blocks_count) + resv_blocks);
+	if (buf->f_bfree < (atomic64_read(&sbi->s_r_blocks_count) + resv_blocks))
 		buf->f_bavail = 0;
 	buf->f_files = le32_to_cpu(es->s_inodes_count);
 	buf->f_ffree = percpu_counter_sum_positive(&sbi->s_freeinodes_counter);

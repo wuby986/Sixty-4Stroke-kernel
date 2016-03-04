@@ -90,11 +90,17 @@ static void vpp_dump_cfw_register(void)
 
 static void vpp_dump_registers(struct vpp_dev *vpp)
 {
-	vpp_dump_cfw_register();
+	unsigned long flags;
 	dev_info(DEV, "=== VPP%d SFR DUMP ===\n", vpp->id);
 	dev_info(DEV, "start count : %d, done count : %d\n",
 			vpp->start_count, vpp->done_count);
 
+	if (!test_bit(VPP_RUNNING, &vpp->state)) {
+		dev_err(DEV, "vpp clocks are disabled\n");
+		return;
+	}
+
+	spin_lock_irqsave(&vpp->slock, flags);
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_ADDRESS, 32, 4,
 			vpp->regs, 0xB0, false);
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_ADDRESS, 32, 4,
@@ -103,6 +109,9 @@ static void vpp_dump_registers(struct vpp_dev *vpp)
 			vpp->regs + 0xA48, 0x10, false);
 	print_hex_dump(KERN_INFO, "", DUMP_PREFIX_ADDRESS, 32, 4,
 			vpp->regs + 0xB00, 0xB0, false);
+
+	vpp_dump_cfw_register();
+	spin_unlock_irqrestore(&vpp->slock, flags);
 }
 
 void vpp_op_timer_handler(unsigned long arg)
@@ -133,7 +142,6 @@ static int vpp_wait_for_update(struct vpp_dev *vpp)
 	}
 	return 0;
 }
-
 
 static void vpp_get_align_variant(struct decon_win_config *config,
 	u32 *offs, u32 *src_f, u32 *src_cr, u32 *dst_cr)
@@ -369,7 +377,6 @@ static int vpp_clk_enable(struct vpp_dev *vpp)
 	}
 
 	if (is_vpp0_series(vpp)) {
-		printk("is_vpp0_series \n");
 		ret = clk_enable(vpp->res.aclk_vpp_sfw0);
 		if(ret) {
 			dev_err(DEV, "Failed res.aclk_vpp_sfw0 clk enable\n");
@@ -381,7 +388,6 @@ static int vpp_clk_enable(struct vpp_dev *vpp)
 			goto err_3;
 		}
 	} else {
-		printk("is_vpp1_series \n");
 		ret = clk_enable(vpp->res.aclk_vpp_sfw1);
 		if(ret) {
 			dev_err(DEV, "Failed res.aclk_vpp_sfw1 clk enable\n");
@@ -495,8 +501,8 @@ static int vpp_get_min_int_lock(struct vpp_dev *vpp)
 	if ((vpp->sc_w == MULTI_FACTOR) && (vpp->sc_h == MULTI_FACTOR)) {
 		vpp->cur_int = vclk_mic / 2 * KHZ;
 	} else {
-		u64 scale_factor = (vclk_mic * vpp->sc_w * vpp->sc_h) / 2;
-		u64 dst_factor = (dst->w * MULTI_FACTOR) / lcd_width ;
+		u64 scale_factor = ((u64) vclk_mic * vpp->sc_w * vpp->sc_h) / 2;
+		u64 dst_factor = ((u64) dst->w * MULTI_FACTOR) / lcd_width ;
 
 		vpp->cur_int = (scale_factor * dst_factor * KHZ) /
 				(MULTI_FACTOR * MULTI_FACTOR * MULTI_FACTOR);

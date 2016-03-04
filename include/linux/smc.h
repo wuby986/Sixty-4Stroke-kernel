@@ -48,6 +48,10 @@
 #define MC_FC_SET_CFW_PROT	0xC20018A0
 #define MC_FC_DRM_SET_CFW_PROT	0x10000000
 
+/* SiP & OEM fastcall ID base */
+#define SMC_SIP_BASE		0x81000000
+#define SMC_OEM_BASE		0x83000000
+
 /* Parameter for smc */
 #define SMC_PROTECTION_ENABLE	1
 #define SMC_PROTECTION_DISABLE	0
@@ -55,6 +59,8 @@
 /* For FMP Ctrl */
 #if defined(CONFIG_SOC_EXYNOS7420)
 #define SMC_CMD_FMP		(0xC2001810)
+#define SMC_CMD_SMU		(0xC2001820)
+#define SMC_CMD_RESUME		(0xC2001830)
 #else
 #define SMC_CMD_FMP		(0x81000020)
 #endif
@@ -90,6 +96,23 @@
 #define FMP_KEY_STORE		0x0
 #define FMP_KEY_SET		0x1
 #define FMP_KEY_RESUME		0x2
+#define FMP_FW_INTEGRITY	0x3
+#define FMP_FW_SELFTEST		0x4
+#define FMP_FW_SHA2_TEST	0x5
+#define FMP_FW_HMAC_SHA2_TEST	0x6
+#define FMP_KEY_CLEAR		0x7
+#define FMP_SECURITY		0x8
+
+#define FMP_DESC_OFF		0x0
+#define FMP_DESC_ON		0x1
+
+#define FMP_SMU_OFF		0x0
+#define FMP_SMU_ON		0x1
+
+#define FMP_SMU_INIT		0x0
+#define FMP_SMU_SET		0x1
+#define FMP_SMU_RESUME		0x2
+#define FMP_SMU_DUMP		0x3
 #else
 #define FMP_MMC_KEY_SET		0x0
 #define FMP_MMC_SUSPEND		0x1
@@ -99,6 +122,7 @@
 #if defined(CONFIG_SOC_EXYNOS7420)
 #define UFS_FMP			0x15572000
 #define EMMC0_FMP		0x15741000
+#define EMMC2_FMP		0x15561000
 #endif
 
 /* For DTRNG Access */
@@ -113,6 +137,7 @@
 #define CFW_VPP1	6
 
 #ifndef __ASSEMBLY__
+extern int _exynos_smc(unsigned long cmd, unsigned long arg1, unsigned long arg2, unsigned long arg3);
 extern int exynos_smc(unsigned long cmd, unsigned long arg1, unsigned long arg2, unsigned long arg3);
 extern int exynos_smc_readsfr(unsigned long addr, unsigned long* val);
 #endif

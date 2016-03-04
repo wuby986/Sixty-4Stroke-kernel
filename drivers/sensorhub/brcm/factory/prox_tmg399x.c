@@ -139,7 +139,7 @@ static int proximity_open_lcd_ldi(struct ssp_data *data)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cancel_filp = filp_open(LCD_LDI_FILE_PATH, O_RDONLY, 0666);
+	cancel_filp = filp_open(LCD_LDI_FILE_PATH, O_RDONLY, 0660);
 	if (IS_ERR(cancel_filp)) {
 		iRet = PTR_ERR(cancel_filp);
 		if (iRet != -ENOENT)
@@ -208,7 +208,7 @@ int proximity_open_calibration(struct ssp_data *data)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cancel_filp = filp_open(CANCELATION_FILE_PATH, O_RDONLY, 0666);
+	cancel_filp = filp_open(CANCELATION_FILE_PATH, O_RDONLY, 0660);
 	if (IS_ERR(cancel_filp)) {
 		iRet = PTR_ERR(cancel_filp);
 		if (iRet != -ENOENT)
@@ -292,7 +292,7 @@ static int proximity_store_cancelation(struct ssp_data *data, int iCalCMD)
 	set_fs(KERNEL_DS);
 
 	cancel_filp = filp_open(CANCELATION_FILE_PATH,
-			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC, 0666);
+			O_CREAT | O_TRUNC | O_WRONLY | O_SYNC, 0660);
 	if (IS_ERR(cancel_filp)) {
 		pr_err("%s: Can't open cancelation file\n", __func__);
 		set_fs(old_fs);
@@ -491,7 +491,7 @@ static ssize_t proximity_probe_show(struct device *dev,
         probe_pass_fail = FAIL;
 	}
 
-	pr_info("[SSP]: %s - All sensor 0x%x, prox_sensor %d \n",
+	pr_info("[SSP]: %s - All sensor 0x%llx, prox_sensor %d \n",
 		__func__, data->uSensorState, probe_pass_fail);
 	
 	return snprintf(buf, PAGE_SIZE, "%d\n", probe_pass_fail);

@@ -551,6 +551,7 @@ void report_prox_raw_data(struct ssp_data *data,
 	data->buf[PROXIMITY_RAW].prox[0] = proxrawdata->prox[0];
 }
 
+#ifdef CONFIG_SENSORS_SSP_SX9306
 void report_grip_data(struct ssp_data *data, struct sensor_value *gripdata)
 {
 	pr_err("[SSP] grip = %d %d %d 0x%02x\n",
@@ -580,6 +581,7 @@ void report_grip_data(struct ssp_data *data, struct sensor_value *gripdata)
 
 	wake_lock_timeout(&data->ssp_wake_lock, 3 * HZ);
 }
+#endif
 
 void report_step_det_data(struct ssp_data *data,
 		struct sensor_value *stepdet_data)
@@ -628,6 +630,43 @@ void report_bulk_comp_data(struct ssp_data *data)
 }
 #endif
 
+void report_tilt_data(struct ssp_data *data,
+		struct sensor_value *tilt_data)
+{
+	data->buf[TILT_DETECTOR].tilt_detector = tilt_data->tilt_detector;
+	ssp_push_1bytes_buffer(data->tilt_indio_dev, tilt_data->timestamp,
+			&tilt_data->tilt_detector);
+	wake_lock_timeout(&data->ssp_wake_lock, 3 * HZ);
+	pr_err("[SSP]: %s: %d", __func__,  tilt_data->tilt_detector);
+}
+
+void report_pickup_data(struct ssp_data *data,
+		struct sensor_value *pickup_data)
+{
+	data->buf[PICKUP_GESTURE].pickup_gesture = pickup_data->pickup_gesture;
+	ssp_push_1bytes_buffer(data->pickup_indio_dev, pickup_data->timestamp,
+			&pickup_data->pickup_gesture);
+	wake_lock_timeout(&data->ssp_wake_lock, 3 * HZ);
+	pr_err("[SSP]: %s: %d", __func__,  pickup_data->pickup_gesture);
+}
+
+void report_motor_test_data(struct ssp_data *data,
+			struct sensor_value *motor_data)
+{
+	s16 motor_test_buf[3];
+
+	data->buf[MOTOR_TEST].x = motor_data->x;
+	data->buf[MOTOR_TEST].y = motor_data->y;
+	data->buf[MOTOR_TEST].z = motor_data->z;
+
+	motor_test_buf[0] = data->buf[MOTOR_TEST].x;
+	motor_test_buf[1] = data->buf[MOTOR_TEST].y;
+	motor_test_buf[2] = data->buf[MOTOR_TEST].z;
+
+	ssp_push_6bytes_buffer(data->motor_test_indio_dev, motor_data->timestamp,
+		motor_test_buf);
+}
+
 int initialize_event_symlink(struct ssp_data *data)
 {
 	int iRet = 0;
@@ -650,10 +689,11 @@ int initialize_event_symlink(struct ssp_data *data)
 	if (iRet < 0)
 		goto iRet_prox_sysfs_create_link;
 
+#ifdef CONFIG_SENSORS_SSP_SX9306
 	iRet = sensors_create_symlink(data->grip_input_dev);
 	if (iRet < 0)
 		goto iRet_grip_sysfs_create_link;
-
+#endif
 	iRet = sensors_create_symlink(data->temp_humi_input_dev);
 	if (iRet < 0)
 		goto iRet_temp_humi_sysfs_create_link;
@@ -687,8 +727,10 @@ iRet_step_cnt_sysfs_create_link:
 iRet_sig_motion_sysfs_create_link:
 	sensors_remove_symlink(data->temp_humi_input_dev);
 iRet_temp_humi_sysfs_create_link:
+#ifdef CONFIG_SENSORS_SSP_SX9306
 	sensors_remove_symlink(data->grip_input_dev);
 iRet_grip_sysfs_create_link:
+#endif
 	sensors_remove_symlink(data->prox_input_dev);
 iRet_prox_sysfs_create_link:
 #ifdef CONFIG_SENSORS_SSP_IRDATA_FOR_CAMERA
@@ -712,7 +754,9 @@ void remove_event_symlink(struct ssp_data *data)
 	sensors_remove_symlink(data->light_ir_input_dev);
 #endif
 	sensors_remove_symlink(data->prox_input_dev);
+#ifdef CONFIG_SENSORS_SSP_SX9306
 	sensors_remove_symlink(data->grip_input_dev);
+#endif
 	sensors_remove_symlink(data->temp_humi_input_dev);
 	sensors_remove_symlink(data->sig_motion_input_dev);
 	sensors_remove_symlink(data->step_cnt_input_dev);
@@ -846,6 +890,48 @@ static const struct iio_chan_spec pressure_channels[] = {
 		.scan_index = 3,
 		.scan_type = IIO_ST('s', IIO_BUFFER_12_BYTES * 8,
 			IIO_BUFFER_12_BYTES * 8, 0)
+	}
+};
+
+static const struct iio_info tilt_info = {
+	.driver_module = THIS_MODULE,
+};
+
+static const struct iio_chan_spec tilt_channels[] = {
+	{
+		.type = IIO_TIMESTAMP,
+		.channel = -1,
+		.scan_index = 3,
+		.scan_type = IIO_ST('s', IIO_BUFFER_1_BYTES*8,
+			IIO_BUFFER_1_BYTES*8, 0)
+	}
+};
+
+static const struct iio_info pickup_info = {
+	.driver_module = THIS_MODULE,
+};
+
+static const struct iio_chan_spec pickup_channels[] = {
+	{
+		.type = IIO_TIMESTAMP,
+		.channel = -1,
+		.scan_index = 3,
+		.scan_type = IIO_ST('s', IIO_BUFFER_1_BYTES*8,
+			IIO_BUFFER_1_BYTES*8, 0)
+	}
+};
+
+static const struct iio_info motor_test_info = {
+	.driver_module = THIS_MODULE,
+};
+
+static const struct iio_chan_spec motor_test_channels[] = {
+	{
+		.type = IIO_TIMESTAMP,
+		.channel = -1,
+		.scan_index = 3,
+		.scan_type = IIO_ST('s', IIO_BUFFER_6_BYTES*8,
+				IIO_BUFFER_6_BYTES*8, 0)
 	}
 };
 
@@ -1138,6 +1224,7 @@ int initialize_input_dev(struct ssp_data *data)
 	}
 	input_set_drvdata(data->prox_input_dev, data);
 
+#ifdef CONFIG_SENSORS_SSP_SX9306
 	data->grip_input_dev = input_allocate_device();
 	if (data->grip_input_dev == NULL)
 		goto err_initialize_grip_input_dev;
@@ -1150,6 +1237,7 @@ int initialize_input_dev(struct ssp_data *data)
 		goto err_initialize_grip_input_dev;
 	}
 	input_set_drvdata(data->grip_input_dev, data);
+#endif
 
 	data->temp_humi_input_dev = input_allocate_device();
 	if (data->temp_humi_input_dev == NULL)
@@ -1275,8 +1363,119 @@ int initialize_input_dev(struct ssp_data *data)
 	}
 	input_set_drvdata(data->meta_input_dev, data);
 
+	data->tilt_indio_dev = iio_device_alloc(0);
+	if (!data->tilt_indio_dev)
+		goto err_alloc_tilt;
+
+	data->tilt_indio_dev->name = "tilt_detector";
+	data->tilt_indio_dev->dev.parent = &data->spi->dev;
+	data->tilt_indio_dev->info = &tilt_info;
+	data->tilt_indio_dev->channels = tilt_channels;
+	data->tilt_indio_dev->num_channels = ARRAY_SIZE(tilt_channels);
+	data->tilt_indio_dev->modes = INDIO_DIRECT_MODE;
+	data->tilt_indio_dev->currentmode = INDIO_DIRECT_MODE;
+
+	iRet = ssp_iio_configure_ring(data->tilt_indio_dev);
+	if (iRet)
+		goto err_config_ring_tilt;
+
+	iRet = iio_buffer_register(data->tilt_indio_dev, data->tilt_indio_dev->channels,
+					data->tilt_indio_dev->num_channels);
+	if (iRet)
+		goto err_register_buffer_tilt;
+
+	iRet = iio_device_register(data->tilt_indio_dev);
+	if (iRet)
+		goto err_register_device_tilt;
+
+	data->pickup_indio_dev = iio_device_alloc(0);
+	if (!data->pickup_indio_dev)
+		goto err_alloc_pickup;
+
+	data->pickup_indio_dev->name = "pickup_gesture";
+	data->pickup_indio_dev->dev.parent = &data->spi->dev;
+	data->pickup_indio_dev->info = &pickup_info;
+	data->pickup_indio_dev->channels = pickup_channels;
+	data->pickup_indio_dev->num_channels = ARRAY_SIZE(pickup_channels);
+	data->pickup_indio_dev->modes = INDIO_DIRECT_MODE;
+	data->pickup_indio_dev->currentmode = INDIO_DIRECT_MODE;
+
+	iRet = ssp_iio_configure_ring(data->pickup_indio_dev);
+	if (iRet)
+		goto err_config_ring_pickup;
+
+	iRet = iio_buffer_register(data->pickup_indio_dev, data->pickup_indio_dev->channels,
+					data->pickup_indio_dev->num_channels);
+	if (iRet)
+		goto err_register_buffer_pickup;
+
+	iRet = iio_device_register(data->pickup_indio_dev);
+	if (iRet)
+		goto err_register_device_pickup;
+
+	data->motor_test_indio_dev = iio_device_alloc(0);
+	if (!data->motor_test_indio_dev)
+		goto err_alloc_motor_test;
+
+	data->motor_test_indio_dev->name = "motor_test";
+	data->motor_test_indio_dev->dev.parent = &data->spi->dev;
+	data->motor_test_indio_dev->info = &motor_test_info;
+	data->motor_test_indio_dev->channels = motor_test_channels;
+	data->motor_test_indio_dev->num_channels = ARRAY_SIZE(motor_test_channels);
+	data->motor_test_indio_dev->modes = INDIO_DIRECT_MODE;
+	data->motor_test_indio_dev->currentmode = INDIO_DIRECT_MODE;
+
+	iRet = ssp_iio_configure_ring(data->motor_test_indio_dev);
+	if (iRet)
+		goto err_config_ring_motor_test;
+
+	iRet = iio_buffer_register(data->motor_test_indio_dev, data->motor_test_indio_dev->channels,
+					data->motor_test_indio_dev->num_channels);
+	if (iRet)
+		goto err_register_buffer_motor_test;
+
+	iRet = iio_device_register(data->motor_test_indio_dev);
+	if (iRet)
+		goto err_register_device_motor_test;
+
 	return SUCCESS;
 
+err_register_device_motor_test:
+	pr_err("[SSP]: failed to register motor_test device\n");
+	iio_buffer_unregister(data->motor_test_indio_dev);
+err_register_buffer_motor_test:
+	pr_err("[SSP]: failed to register motor_test buffer\n");
+	ssp_iio_unconfigure_ring(data->motor_test_indio_dev);
+err_config_ring_motor_test:
+	pr_err("[SSP]: failed to configure motor_test ring buffer\n");
+	iio_device_free(data->motor_test_indio_dev);
+err_alloc_motor_test:
+	pr_err("[SSP]: failed to allocate memory for iio motor_test device\n");
+	iio_device_unregister(data->pickup_indio_dev);
+err_register_device_pickup:
+	pr_err("[SSP]: failed to register pickup device\n");
+	iio_buffer_unregister(data->pickup_indio_dev);
+err_register_buffer_pickup:
+	pr_err("[SSP]: failed to register pickup buffer\n");
+	ssp_iio_unconfigure_ring(data->pickup_indio_dev);
+err_config_ring_pickup:
+	pr_err("[SSP]: failed to configure pickup ring buffer\n");
+	iio_device_free(data->pickup_indio_dev);
+err_alloc_pickup:
+	pr_err("[SSP]: failed to allocate memory for iio pickup device\n");
+	iio_device_unregister(data->tilt_indio_dev);
+err_register_device_tilt:
+	pr_err("[SSP]: failed to register tilt device\n");
+	iio_buffer_unregister(data->tilt_indio_dev);
+err_register_buffer_tilt:
+	pr_err("[SSP]: failed to register tilt buffer\n");
+	ssp_iio_unconfigure_ring(data->tilt_indio_dev);
+err_config_ring_tilt:
+	pr_err("[SSP]: failed to configure tilt ring buffer\n");
+	iio_device_free(data->tilt_indio_dev);
+err_alloc_tilt:
+	pr_err("[SSP]: failed to allocate memory for iio tilt device\n");
+	input_unregister_device(data->meta_input_dev);
 err_initialize_meta_input_dev:
 	pr_err("[SSP]: %s - could not allocate meta event input device\n", __func__);
 #ifdef CONFIG_SENSORS_SSP_INTERRUPT_GYRO_SENSOR
@@ -1296,9 +1495,11 @@ err_initialize_gesture_input_dev:
 	input_unregister_device(data->temp_humi_input_dev);
 err_initialize_temp_humi_input_dev:
 	pr_err("[SSP]: %s - could not allocate temp_humi input device\n", __func__);
+#ifdef CONFIG_SENSORS_SSP_SX9306
 	input_unregister_device(data->grip_input_dev);
 err_initialize_grip_input_dev:
 	pr_err("[SSP]: %s - could not allocate grip input device\n", __func__);
+#endif
 	input_unregister_device(data->prox_input_dev);
 err_initialize_proximity_input_dev:
 	pr_err("[SSP]: %s - could not allocate proximity input device\n", __func__);

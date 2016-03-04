@@ -1892,8 +1892,10 @@ static int do_test(int m)
 		ret += alg_test("hmac(sha384-generic)", "hmac(sha384)", 0, 0);
 		ret += alg_test("hmac(sha512-generic)", "hmac(sha512)", 0, 0);
 
+#ifdef CONFIG_CRYPTO_ANSI_CPRNG
 		/* RNG */
 		ret += alg_test("fips_ansi_cprng", "ansi_cprng", 0, 0);
+#endif
 
 #ifdef CONFIG_CRYPTO_DRBG
 		/* DRBG */
@@ -1954,7 +1956,11 @@ static int __init tcrypt_mod_init(void)
 	}
     #else
 	} else {
-		do_integrity_check();
+		if (do_integrity_check() != 0)
+		{
+		    printk(KERN_ERR "tcrypt: CRYPTO API FIPS Integrity Check failed!!!\n");
+		    set_in_fips_err();
+		}
 		if(in_fips_err()) {
 			printk(KERN_ERR "tcrypt: CRYPTO API in FIPS Error!!!\n");
 		} else {

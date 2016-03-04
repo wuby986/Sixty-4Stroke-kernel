@@ -27,6 +27,26 @@
 
 #define MIF_INIT_TIMEOUT	(30 * HZ)
 
+enum crash_reason_event
+{
+	CRASH_REASON_RESET = 0,
+	CRASH_REASON_EXIT,
+	CRASH_REASON_AT_RX,
+	CRASH_REASON_AT_TX,
+	CRASH_REASON_AP_PM,
+	CRASH_REASON_CP_PM,
+	CRASH_REASON_MAX_CNT
+};
+
+static const char const *cp_crash_reason[] = {
+	[CRASH_REASON_RESET] = "CP_CRASH_RESET\n",
+	[CRASH_REASON_EXIT] = "CP_CRASH_EXIT\n",
+	[CRASH_REASON_AT_RX] = "abnormal RX. contact to CP team\n",
+	[CRASH_REASON_AT_TX] = "abnormal TX. contack to AP team\n",
+	[CRASH_REASON_AP_PM] = "PM TIMEOUT. contact to AP team\n",
+	[CRASH_REASON_CP_PM] = "PM failed. CP team needs to investigate on their improper PM operations\n"
+};
+
 static struct wake_lock mc_wake_lock;
 
 static void print_mc_state(struct modem_ctl *mc)
@@ -52,7 +72,7 @@ void modem_state_change(struct modem_ctl *mc, enum modem_state new_state)
 	if (mc->iod_ds && mc->iod_ds->modem_state_changed)
 		mc->iod_ds->modem_state_changed(mc->iod_ds, new_state);
 
-	if (mc->bootd && mc->iod->modem_state_changed)
+	if (mc->bootd && mc->bootd->modem_state_changed)
 		mc->bootd->modem_state_changed(mc->bootd, new_state);
 }
 
@@ -192,8 +212,8 @@ static int ss333_on(struct modem_ctl *mc)
 		mif_err("%s->wake_lock locked\n", mc->name);
 	}
 
-	if (ld->ready)
-		ld->ready(ld);
+	if (ld->off)
+		ld->off(ld);
 
 	spin_unlock_irqrestore(&mc->lock, flags);
 
@@ -313,17 +333,15 @@ static void handle_no_response_cp_crash(unsigned long arg)
 	mif_err("%s: ERR! No response from CP\n", mc->name);
 
 	spin_lock_irqsave(&mc->lock, flags);
-
-#ifdef CONFIG_SEC_MODEM_DEBUG
 	modem_state_change(mc, STATE_CRASH_EXIT);
-#else
-	modem_state_change(mc, STATE_CRASH_RESET);
-#endif
 	spin_unlock_irqrestore(&mc->lock, flags);
 }
 
 static int ss333_force_crash_exit(struct modem_ctl *mc)
 {
+	struct io_device *iod = mc->iod;
+	struct link_device *ld = get_current_link(iod);
+
 	mif_err("+++\n");
 
 	mif_add_timer(&mc->crash_ack_timer, FORCE_CRASH_ACK_TIMEOUT,
@@ -333,6 +351,9 @@ static int ss333_force_crash_exit(struct modem_ctl *mc)
 		wake_lock(mc->wake_lock);
 		mif_err("%s->wake_lock locked\n", mc->name);
 	}
+
+	if (ld->off)
+		ld->off(ld);
 
 	gpio_set_value(mc->gpio_ap_dump_int, 1);
 	mif_info("set ap_dump_int(%d) to high=%d\n",
@@ -364,8 +385,8 @@ static int ss333_dump_reset(struct modem_ctl *mc)
 		mif_err("%s->wake_lock locked\n", mc->name);
 	}
 
-	if (ld->ready)
-		ld->ready(ld);
+	if (ld->off)
+		ld->off(ld);
 
 	spin_unlock_irqrestore(&mc->lock, flags);
 
@@ -448,6 +469,49 @@ static int ss333_boot_done(struct modem_ctl *mc)
 	return 0;
 }
 
+static int ss333_cp_crash_reason(struct modem_ctl *mc, char *buf)
+{
+	unsigned int log_len = 0;
+	int event = 0;
+
+	switch (mc->crash_info) {
+	case MDM_EVENT_CP_FORCE_RESET:
+	case MDM_CRASH_CMD_RESET:
+		event = CRASH_REASON_RESET;
+		break;
+	case MDM_EVENT_CP_FORCE_CRASH:
+	case MDM_CRASH_CMD_EXIT:
+		event = CRASH_REASON_EXIT;
+		break;
+	case MDM_CRASH_INVALID_RB:
+	case MDM_CRASH_NO_MEM:
+		event = CRASH_REASON_AT_TX;
+		break;
+	case MDM_CRASH_INVALID_IOD:
+	case MDM_CRASH_INVALID_SKBCB:
+	case MDM_CRASH_INVALID_SKBIOD:
+	case MDM_CRASH_PACKET_CRACKED:
+	case MDM_EVENT_CP_ABNORMAL_RX:
+		event = CRASH_REASON_AT_RX;
+		break;
+	case MDM_CRASH_PM_FAIL:
+		event = CRASH_REASON_AP_PM;
+		break;
+	case MDM_CRASH_PM_CP_FAIL:
+		event = CRASH_REASON_CP_PM;
+		break;
+	default:
+		return 0;
+	}
+
+	strncat(buf,
+		cp_crash_reason[event],
+		strlen(cp_crash_reason[event]));
+	log_len = strlen(cp_crash_reason[event]);
+
+	return log_len;
+}
+
 static void ss333_get_ops(struct modem_ctl *mc)
 {
 	mc->ops.modem_on = ss333_on;
@@ -458,6 +522,7 @@ static void ss333_get_ops(struct modem_ctl *mc)
 	mc->ops.modem_boot_done = ss333_boot_done;
 	mc->ops.modem_force_crash_exit = ss333_force_crash_exit;
 	mc->ops.modem_dump_reset = ss333_dump_reset;
+	mc->ops.modem_cp_upload = ss333_cp_crash_reason;
 }
 
 static int dt_gpio_config(struct modem_ctl *mc, struct modem_data *pdata)
@@ -517,6 +582,7 @@ static int modemctl_notify_call(struct notifier_block *nfb,
 	case MDM_CRASH_CMD_RESET:
 	case MDM_CRASH_CMD_EXIT:
 	case MDM_EVENT_CP_FORCE_CRASH:
+	case MDM_CRASH_BY_IOSM:
 		ss333_force_crash_exit(mc);
 		break;
 	case MDM_EVENT_CP_ABNORMAL_RX:

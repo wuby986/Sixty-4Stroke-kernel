@@ -40,7 +40,7 @@
 #include "../internal.h"
 #include <linux/lzo.h>
 
-#define SCFS_VERSION "1.2.20"
+#define SCFS_VERSION "1.2.22"
 
 #if MAX_BUFFER_CACHE
 //extern struct read_buffer_cache buffer_cache[];
@@ -180,6 +180,7 @@ static void scfs_evict_inode(struct inode *inode)
 #else
 	end_writeback(inode);
 #endif
+	scfs_clear_cluster(inode);
 	/* to conserve memory, evicted inode will throw out the cluster info */
 	if (sii->cinfo_array) {
 		scfs_cinfo_free(sii, sii->cinfo_array);
@@ -341,6 +342,9 @@ static int scfs_debugfs_init(struct super_block *sb)
 	sbi->scfs_op_mode |= (1 << SM_LowInval);
 #endif
 #endif
+	debugfs_create_atomic64_t("scfs_decomped_byte", S_IRUGO,
+		debugfs_root, &sbi->scfs_decomped_byte);
+
 	return 0;
 fail:
 	debugfs_remove_recursive(debugfs_root);
@@ -471,7 +475,7 @@ static struct dentry *scfs_mount(struct file_system_type *fs_type, int flags,
 		sbi->buffer_cache[i].ino = -1;
 		sbi->buffer_cache[i].clust_num = -1;
 		sbi->buffer_cache[i].is_compressed = -1;
-		atomic_set(&sbi->buffer_cache[i].is_used, -1);
+		atomic_set(&sbi->buffer_cache[i].is_using, 0);
 	}
 	spin_lock_init(&sbi->buffer_cache_lock);
 #endif
@@ -526,7 +530,9 @@ static struct dentry *scfs_mount(struct file_system_type *fs_type, int flags,
 		SCFS_MEMPOOL_SIZE / 1024, SCFS_MEMPOOL_COUNT,
 		dev_name, tfm_names[sbi->options.comp_type]);
 
+#ifdef CONFIG_DEBUG_FS
 	scfs_mounted++;
+#endif
 	sb->s_flags |= MS_ACTIVE;
 	return dget(sb->s_root);
 
@@ -651,6 +657,9 @@ static void scfs_d_release(struct dentry *dentry)
 	return;
 }
 
+#ifdef CONFIG_RKP_NS_PROT
+extern void rkp_assign_mnt_flags(struct vfsmount *,int);
+#endif
 static int scfs_remount_fs(struct super_block *sb, int *flags, char *options)
 {
 	struct scfs_sb_info *sbi = SCFS_S(sb);
@@ -689,8 +698,13 @@ static int scfs_remount_fs(struct super_block *sb, int *flags, char *options)
 		printk("scfs-remount fail : %d\n", ret);
 	else {
 		br_write_lock(&vfsmount_lock);
+#ifdef CONFIG_RKP_NS_PROT
+		mnt_flags |= mnt->mnt->mnt_flags & ~MNT_USER_SETTABLE_MASK;
+		rkp_assign_mnt_flags(mnt->mnt,mnt_flags);
+#else
 		mnt_flags |= mnt->mnt.mnt_flags & ~MNT_USER_SETTABLE_MASK;
 		mnt->mnt.mnt_flags = mnt_flags;
+#endif
 		br_write_unlock(&vfsmount_lock);
 	}
 	up_write(&lower_sb->s_umount);
@@ -763,11 +777,13 @@ static int __init scfs_init(void)
 		goto out;
 	}
 
+#ifdef CONFIG_SCFS_USE_CRYPTO
 	ret = scfs_compressors_init();
 	if (ret) {
 		SCFS_PRINT_ERROR("compressor initialization was failed.\n");
 		goto out_free_kmem_caches;
 	}
+#endif
 
 	ret = do_sysfs_registration();
 	if (ret) {
@@ -798,8 +814,10 @@ out_destroy_kthread:
 out_do_sysfs_unregistration:
 	do_sysfs_unregistration();
 out_do_scfs_compressor_exit:
+#ifdef CONFIG_SCFS_USE_CRYPTO
 	scfs_compressors_exit();
 out_free_kmem_caches:
+#endif
 	scfs_free_kmem_caches();
 out:
 	return ret;
@@ -810,7 +828,9 @@ static void __exit scfs_exit(void)
 	//scfs_destroy_kthread();
 	do_sysfs_unregistration();
 	unregister_filesystem(&scfs_fs_type);
+#ifdef CONFIG_SCFS_USE_CRYPTO
 	scfs_compressors_exit();
+#endif
 	scfs_free_kmem_caches();
 }
 

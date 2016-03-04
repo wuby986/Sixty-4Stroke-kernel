@@ -106,7 +106,7 @@ struct arizona_extcon_info {
 	bool detecting;
 	int jack_flips;
 
-	int hpdet_ip;
+	int hpdet_ip_version;
 
 	struct extcon_dev edev;
 };
@@ -161,7 +161,12 @@ static void arizona_extcon_hp_clamp(struct arizona_extcon_info *info,
 {
 	struct arizona *arizona = info->arizona;
 	unsigned int mask, val = 0;
+	unsigned int ep_sel = 0;
 	int ret;
+
+	mutex_lock_nested(&arizona->dapm->card->dapm_mutex,
+			  SND_SOC_DAPM_CLASS_RUNTIME);
+
 
 	switch (arizona->type) {
 	case WM5102:
@@ -179,17 +184,21 @@ static void arizona_extcon_hp_clamp(struct arizona_extcon_info *info,
 		else
 			val = ARIZONA_HP1L_FLWR | ARIZONA_HP1L_SHRTI;
 		break;
+	case CS47L35:
+		/* check whether audio is routed to EPOUT, do not disable OUT1
+		 * in that case */
+		regmap_read(arizona->regmap, ARIZONA_OUTPUT_ENABLES_1, &ep_sel);
+		ep_sel &= ARIZONA_EP_SEL_MASK;
+		/* fall through to next step to set common variables */
 	default:
 		mask = 0;
 		break;
 	};
 
-	mutex_lock(&arizona->dapm->card->dapm_mutex);
-
 	arizona->hpdet_clamp = clamp;
 
 	/* Keep the HP output stages disabled while doing the clamp */
-	if (clamp) {
+	if (clamp && !ep_sel) {
 		ret = regmap_update_bits(arizona->regmap,
 					 ARIZONA_OUTPUT_ENABLES_1,
 					 ARIZONA_OUT1L_ENA |
@@ -215,7 +224,7 @@ static void arizona_extcon_hp_clamp(struct arizona_extcon_info *info,
 	}
 
 	/* Restore the desired state while not doing the clamp */
-	if (!clamp) {
+	if (!clamp && !ep_sel) {
 		ret = regmap_update_bits(arizona->regmap,
 					 ARIZONA_OUTPUT_ENABLES_1,
 					 ARIZONA_OUT1L_ENA |
@@ -252,17 +261,33 @@ static void arizona_extcon_set_mode(struct arizona_extcon_info *info, int mode)
 
 static const char *arizona_extcon_get_micbias(struct arizona_extcon_info *info)
 {
-	switch (info->micd_modes[0].bias) {
-	case 1:
-		return "MICBIAS1";
-	case 2:
-		return "MICBIAS2";
-	case 3:
-		return "MICBIAS3";
-	case 4:
-		return "MICBIAS4";
+	struct arizona *arizona = info->arizona;
+
+	switch (arizona->type) {
+	case CS47L35:
+		switch (info->micd_modes[0].bias) {
+		case 1:
+			return "MICBIAS1A";
+		case 2:
+			return "MICBIAS1B";
+		case 3:
+			return "MICBIAS2A";
+		default:
+			return "MICVDD";
+		}
 	default:
-		return "MICVDD";
+		switch (info->micd_modes[0].bias) {
+		case 1:
+			return "MICBIAS1";
+		case 2:
+			return "MICBIAS2";
+		case 3:
+			return "MICBIAS3";
+		case 4:
+			return "MICBIAS4";
+		default:
+			return "MICVDD";
+		}
 	}
 }
 
@@ -427,7 +452,7 @@ static int arizona_hpdet_read(struct arizona_extcon_info *info)
 		return ret;
 	}
 
-	switch (info->hpdet_ip) {
+	switch (info->hpdet_ip_version) {
 	case 0:
 		if (!(val & ARIZONA_HP_DONE)) {
 			dev_err(arizona->dev, "HPDET did not complete: %x\n",
@@ -488,7 +513,7 @@ static int arizona_hpdet_read(struct arizona_extcon_info *info)
 
 	default:
 		dev_warn(arizona->dev, "Unknown HPDET IP revision %d\n",
-			 info->hpdet_ip);
+			 info->hpdet_ip_version);
 	case 2:
 		if (!(val & ARIZONA_HP_DONE_B)) {
 			dev_err(arizona->dev, "HPDET did not complete: %x\n",
@@ -1267,23 +1292,23 @@ static int arizona_extcon_of_get_pdata(struct arizona *arizona)
 {
 	struct arizona_pdata *pdata = &arizona->pdata;
 
-	arizona_of_read_u32(arizona, "wlf,micd-detect-debounce", false,
+	arizona_of_read_s32(arizona, "wlf,micd-detect-debounce", false,
 			    &pdata->micd_detect_debounce);
 
 	pdata->micd_pol_gpio = arizona_of_get_named_gpio(arizona,
 							 "wlf,micd-pol-gpio",
 							 false);
 
-	arizona_of_read_u32(arizona, "wlf,micd-bias-start-time", false,
+	arizona_of_read_s32(arizona, "wlf,micd-bias-start-time", false,
 			    &pdata->micd_bias_start_time);
 
-	arizona_of_read_u32(arizona, "wlf,micd-rate", false,
+	arizona_of_read_s32(arizona, "wlf,micd-rate", false,
 			    &pdata->micd_rate);
 
-	arizona_of_read_u32(arizona, "wlf,micd-dbtime", false,
+	arizona_of_read_s32(arizona, "wlf,micd-dbtime", false,
 			    &pdata->micd_dbtime);
 
-	arizona_of_read_u32(arizona, "wlf,micd-timeout", false,
+	arizona_of_read_s32(arizona, "wlf,micd-timeout", false,
 			    &pdata->micd_timeout);
 
 	pdata->micd_force_micbias =
@@ -1309,7 +1334,7 @@ static int arizona_extcon_of_get_pdata(struct arizona *arizona)
 
 	arizona_of_read_u32(arizona, "wlf,gpsw", false, &pdata->gpsw);
 
-	arizona_of_read_u32(arizona, "wlf,init-mic-delay", false,
+	arizona_of_read_s32(arizona, "wlf,init-mic-delay", false,
 			    &pdata->init_mic_delay);
 
 	arizona_of_read_u32(arizona, "wlf,micd-clamp-mode", false,
@@ -1487,7 +1512,7 @@ static int arizona_extcon_probe(struct platform_device *pdev)
 			break;
 		default:
 			info->micd_clamp = true;
-			info->hpdet_ip = 1;
+			info->hpdet_ip_version = 1;
 			break;
 		}
 		break;
@@ -1498,13 +1523,16 @@ static int arizona_extcon_probe(struct platform_device *pdev)
 			break;
 		default:
 			info->micd_clamp = true;
-			info->hpdet_ip = 2;
+			info->hpdet_ip_version = 2;
 			break;
 		}
 		break;
+	case CS47L35:
+		arizona->pdata.micd_force_micbias = true;
+		/* fall through to default case to set common properties */
 	default:
 		info->micd_clamp = true;
-		info->hpdet_ip = 2;
+		info->hpdet_ip_version = 2;
 		break;
 	}
 

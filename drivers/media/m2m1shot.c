@@ -588,6 +588,8 @@ static int m2m1shot_process(struct m2m1shot_context *ctx,
 
 	kref_get(&ctx->kref);
 
+	mutex_lock(&ctx->mutex);
+
 	ret = m2m1shot_prepare_task(m21dev, ctx, task);
 	if (ret)
 		goto err;
@@ -627,6 +629,9 @@ static int m2m1shot_process(struct m2m1shot_context *ctx,
 
 	m2m1shot_finish_task(m21dev, ctx, task);
 err:
+
+	mutex_unlock(&ctx->mutex);
+
 	kref_put(&ctx->kref, m2m1shot_destroy_context);
 
 	if (ret)
@@ -808,6 +813,18 @@ static long m2m1shot_compat_ioctl32(struct file *filp,
 			dev_err(m21dev->dev,
 				"%s: Failed to read userdata\n", __func__);
 			return -EFAULT;
+		}
+
+		if (data.buf_out.num_planes > M2M1SHOT_MAX_PLANES) {
+			dev_err(m21dev->dev, "Invalid number of output planes %u.\n",
+				data.buf_out.num_planes);
+			return -EINVAL;
+		}
+
+		if (data.buf_cap.num_planes > M2M1SHOT_MAX_PLANES) {
+			dev_err(m21dev->dev, "Invalid number of capture planes %u.\n",
+				data.buf_cap.num_planes);
+			return -EINVAL;
 		}
 
 		task.task.fmt_out.fmt = data.fmt_out.fmt;

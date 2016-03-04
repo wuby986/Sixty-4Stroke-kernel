@@ -39,6 +39,8 @@
 #define DSIM_RX_FIFO_READ_DONE	(0x30800002)
 #define DSIM_MAX_RX_FIFO	(64)
 
+#define AID_INTERPOLATION
+
 #define dsim_err(fmt, ...)					\
 	do {							\
 		pr_err(pr_fmt(fmt), ##__VA_ARGS__);		\
@@ -99,13 +101,16 @@ struct panel_private {
 	unsigned char id[3];
 	unsigned char code[5];
 	unsigned char elvss_set[22];
-	unsigned char tset[8];
+	unsigned char tset[30];	// HA3 is 30
+	unsigned char aid[16];
 	int	temperature;
 	unsigned int coordinate[2];
-	unsigned char date[4];
+	unsigned char date[7];
 	unsigned int lcdConnected;
 	unsigned int state;
 	unsigned int auto_brightness;
+	unsigned int auto_brightness_level;
+	unsigned int brightness_step;
 	unsigned int br_index;
 	unsigned int acl_enable;
 	unsigned int caps_enable;
@@ -113,11 +118,16 @@ struct panel_private {
 	unsigned int current_hbm;
 	unsigned int current_vint;
 	unsigned int siop_enable;
-
+#ifdef CONFIG_LCD_BURNIN_CORRECTION
+	unsigned char ldu_correction_state;
+	unsigned int *ldu_tbl[8];			// 0 : default, 1 : ldu comp
+#endif
 	void *dim_data;
 	void *dim_info;
 	unsigned int *br_tbl;
+	unsigned char *inter_aor_tbl;
 	unsigned int *hbm_inter_br_tbl;
+	unsigned int *gallery_br_tbl;
 	unsigned char **hbm_tbl;
 	unsigned char **acl_cutoff_tbl;
 	unsigned char **acl_opr_tbl;
@@ -147,25 +157,19 @@ struct panel_private {
 	struct mutex	alpm_lock;
 	unsigned char mtpForALPM[36];
 	unsigned char prev_VT[2];
+	unsigned char alpm_support;			// because zero2 use 2panel(ha2, hf3)
 #endif
 	unsigned int interpolation;
 	char hbm_elvss_comp;
 	unsigned char hbm_elvss;
 	unsigned int hbm_index;
-/* hbm interpolation for color weakness */
+
+	/* hbm interpolation for color weakness */
 	unsigned int weakness_hbm_comp;
+	int is_br_override;
+	int override_br_value;
 
-/*variable for A3 Line */
-	struct delayed_work octa_a3_read_data_work;
-	struct workqueue_struct	*octa_a3_read_data_work_q;
-	unsigned int octa_a3_read_cnt;
-
-	unsigned int a3_elvss_updated;
-	char a3_elvss_temp_0[5];
-	char a3_elvss_temp_20[5];
-	unsigned char a3_vint[10];
-	unsigned int a3_vint_updated;
-
+	int esd_disable;
 };
 
 struct dsim_panel_ops {
@@ -196,7 +200,8 @@ struct dsim_device {
 	unsigned int enabled;
 	struct decon_lcd lcd_info;
 	struct dphy_timing_value	timing;
-	int				pktgo;
+	int	pktgo;
+	int	glide_display_size;
 
 	int id;
 	u32 data_lane_cnt;

@@ -33,7 +33,6 @@
 #include <linux/regulator/machine.h>
 
 #include <linux/muic/muic.h>
-#include <linux/muic/max77833-muic-hv-typedef.h>
 #include <linux/muic/max77833-muic.h>
 
 #if defined (CONFIG_OF)
@@ -271,6 +270,7 @@ static int max77833_i2c_probe(struct i2c_client *i2c,
 	struct max77833_platform_data *pdata = i2c->dev.platform_data;
 
 	u8 reg_data;
+	u16 reg16_data;
 	int ret = 0;
 
 	pr_info("%s:%s\n", MFD_DEV_NAME, __func__);
@@ -341,12 +341,24 @@ static int max77833_i2c_probe(struct i2c_client *i2c,
 
 	/* No active discharge on safeout ldo 1,2 */
 	max77833_update_reg(i2c, MAX77833_PMIC_REG_SAFEOUT_CTRL, 0x00, 0x30);
+	max77833_update_reg(i2c, MAX77833_PMIC_REG_SAFEOUT_CTRL, 0x0, 0x40);
+	max77833_read_reg(i2c, MAX77833_PMIC_REG_SAFEOUT_CTRL, &reg_data);
+	pr_info("%s:%s reg[0x%02x]: 0x%02x\n", MFD_DEV_NAME, __func__,
+			MAX77833_PMIC_REG_SAFEOUT_CTRL, reg_data);
 
 	max77833->muic = i2c_new_dummy(i2c->adapter, I2C_ADDR_MUIC);
 	i2c_set_clientdata(max77833->muic, max77833);
 
 	max77833->fuelgauge = i2c_new_dummy(i2c->adapter, I2C_ADDR_FG);
 	i2c_set_clientdata(max77833->fuelgauge, max77833);
+
+	/* checking pass5 in OTP */
+	max77833_write_fg(max77833->fuelgauge, 0x00D6, 0x00E5);
+	max77833_write_fg(max77833->fuelgauge, 0x00D8, 0x00D2);
+	max77833_read_fg(max77833->fuelgauge, 0x04DC, &reg16_data);
+	max77833->pmic_rev_pass5 = ((reg16_data & 0xFF) >= 0x52) ? true : false;
+	pr_info("%s:%s [0x04DC : 0x%04x]\n", __func__,
+		(max77833->pmic_rev_pass5) ? "over PASS5" : "under PASS5", reg16_data);
 
 	ret = max77833_irq_init(max77833);
 
@@ -457,7 +469,6 @@ u8 max77833_dumpaddr_pmic[] = {
 	MAX77833_PMIC_REG_MAINCTRL1,
 	MAX77833_PMIC_REG_MCONFIG,
 };
-*/
 
 u8 max77833_dumpaddr_muic[] = {
 	MAX77833_MUIC_REG_INTMASK1,
@@ -470,7 +481,6 @@ u8 max77833_dumpaddr_muic[] = {
 	MAX77833_MUIC_REG_CTRL3,
 };
 
-/*
 u8 max77833_dumpaddr_haptic[] = {
 	MAX77833_HAPTIC_REG_CONFIG1,
 	MAX77833_HAPTIC_REG_CONFIG2,
@@ -509,11 +519,11 @@ static int max77833_freeze(struct device *dev)
 	for (i = 0; i < ARRAY_SIZE(max77833_dumpaddr_pmic); i++)
 		max77833_read_reg(i2c, max77833_dumpaddr_pmic[i],
 				&max77833->reg_pmic_dump[i]);
-
+#if 0
 	for (i = 0; i < ARRAY_SIZE(max77833_dumpaddr_muic); i++)
 		max77833_read_reg(i2c, max77833_dumpaddr_muic[i],
 				&max77833->reg_muic_dump[i]);
-
+#endif
 	for (i = 0; i < ARRAY_SIZE(max77833_dumpaddr_led); i++)
 		max77833_read_reg(i2c, max77833_dumpaddr_led[i],
 				&max77833->reg_led_dump[i]);
@@ -534,11 +544,11 @@ static int max77833_restore(struct device *dev)
 	for (i = 0; i < ARRAY_SIZE(max77833_dumpaddr_pmic); i++)
 		max77833_write_reg(i2c, max77833_dumpaddr_pmic[i],
 				max77833->reg_pmic_dump[i]);
-
+#if 0
 	for (i = 0; i < ARRAY_SIZE(max77833_dumpaddr_muic); i++)
 		max77833_write_reg(i2c, max77833_dumpaddr_muic[i],
 				max77833->reg_muic_dump[i]);
-
+#endif
 	for (i = 0; i < ARRAY_SIZE(max77833_dumpaddr_led); i++)
 		max77833_write_reg(i2c, max77833_dumpaddr_led[i],
 				max77833->reg_led_dump[i]);

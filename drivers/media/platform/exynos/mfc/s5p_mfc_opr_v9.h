@@ -64,6 +64,10 @@ void s5p_mfc_enc_calc_src_size(struct s5p_mfc_ctx *ctx);
 #define s5p_mfc_get_disp_frame_type()	(readl(ctx->dev->regs_base + \
 						S5P_FIMV_D_DISPLAY_FRAME_TYPE) \
 						& S5P_FIMV_DISPLAY_FRAME_MASK)
+#define s5p_mfc_get_interlace_type()	((readl(dev->regs_base + 			\
+						S5P_FIMV_D_DISPLAY_FRAME_TYPE)		\
+						>> S5P_FIMV_DISPLAY_TEMP_INFO_SHIFT)	\
+						& S5P_FIMV_DISPLAY_TEMP_INFO_MASK)
 #define s5p_mfc_get_consumed_stream()	readl(dev->regs_base + \
 						S5P_FIMV_D_DECODED_NAL_SIZE)
 #define s5p_mfc_get_int_reason()	(readl(dev->regs_base + \
@@ -90,6 +94,8 @@ void s5p_mfc_enc_calc_src_size(struct s5p_mfc_ctx *ctx);
 						S5P_FIMV_RET_INSTANCE_ID)
 #define s5p_mfc_get_enc_dpb_count()	readl(dev->regs_base + \
 						S5P_FIMV_E_NUM_DPB)
+#define s5p_mfc_get_enc_scratch_size()	readl(dev->regs_base + \
+						S5P_FIMV_E_MIN_SCRATCH_BUFFER_SIZE)
 #define s5p_mfc_get_enc_strm_size()	readl(dev->regs_base + \
 						S5P_FIMV_E_STREAM_SIZE)
 #define s5p_mfc_get_enc_slice_type()	readl(dev->regs_base + \
@@ -106,9 +112,9 @@ void s5p_mfc_enc_calc_src_size(struct s5p_mfc_ctx *ctx);
 					& S5P_FIMV_D_MVC_VIEW_ID_DISP_MASK)
 
 #define s5p_mfc_is_interlace_picture()	((readl(dev->regs_base + \
-					S5P_FIMV_D_DECODED_STATUS) & \
-					S5P_FIMV_DEC_STATUS_INTERLACE_MASK) == \
-					S5P_FIMV_DEC_STATUS_INTERLACE)
+					S5P_FIMV_D_DISPLAY_STATUS) & \
+					S5P_FIMV_DEC_STATUS_INTERLACE_MASK)) >> \
+					S5P_FIMV_DEC_STATUS_INTERLACE_SHIFT
 
 #define s5p_mfc_get_dec_status()	(readl(dev->regs_base + \
 						S5P_FIMV_D_DECODED_STATUS) \
@@ -142,28 +148,9 @@ void s5p_mfc_enc_calc_src_size(struct s5p_mfc_ctx *ctx);
 	} while (0)
 
 /* Definition */
-#define ENC_MULTI_SLICE_MB_MAX		((1 << 30) - 1)
-#define ENC_MULTI_SLICE_BIT_MIN		2800
-#define ENC_MULTI_SLICE_BYTE_MIN	350
-#define ENC_INTRA_REFRESH_MB_MAX	((1 << 18) - 1)
-#define ENC_VBV_BUF_SIZE_MAX		((1 << 30) - 1)
-#define ENC_H264_LOOP_FILTER_AB_MIN	-12
-#define ENC_H264_LOOP_FILTER_AB_MAX	12
-#define ENC_H264_RC_FRAME_RATE_MAX	((1 << 16) - 1)
-#define ENC_H263_RC_FRAME_RATE_MAX	((1 << 16) - 1)
-#define ENC_H264_PROFILE_MAX		3
-#define ENC_H264_LEVEL_MAX		42
-#define ENC_MPEG4_VOP_TIME_RES_MAX	((1 << 16) - 1)
 #define FRAME_DELTA_DEFAULT		1
 #define TIGHT_CBR_MAX			10
 #define I_LIMIT_CBR_MAX			5
-#define ENC_HEVC_RC_FRAME_RATE_MAX	((1 << 16) - 1)
-#define ENC_HEVC_QP_INDEX_MIN	-12
-#define ENC_HEVC_QP_INDEX_MAX	12
-#define ENC_HEVC_LOOP_FILTER_MIN	-12
-#define ENC_HEVC_LOOP_FILTER_MAX	12
-#define ENC_HEVC_RC_FRAME_RATE_MAX	((1 << 16) - 1)
-#define ENC_HEVC_LEVEL_MAX		62
 
 /* Definitions for shared memory compatibility */
 #define PIC_TIME_TOP		S5P_FIMV_D_RET_PICTURE_TAG_TOP
@@ -226,12 +213,6 @@ void s5p_mfc_enc_calc_src_size(struct s5p_mfc_ctx *ctx);
 /* Encoder buffer size for hevc */
 #define ENC_HEVC_ME_SIZE(x, y)				\
 			((((x * 32 / 8 + 63) / 64 * 64) * ((y * 8) + 64)) + (x * y * 32))
-
-/* MV range is [16,256] for v6.1, [16,128] for v6.5 */
-#define ENC_V61_MV_RANGE		256
-#define ENC_V65_MV_RANGE		128
-/* MV range is [16,32] for v7.8 */
-#define ENC_V78_MV_RANGE		32
 
 #define NUM_MPEG4_LF_BUF		2
 

@@ -929,6 +929,12 @@ int fimc_is_video_reqbufs(struct file *file,
 		goto p_err;
 	}
 
+	ret = CALL_QOPS(queue, request_bufs, GET_DEVICE(vctx), request->count);
+	if (ret) {
+		err("request_bufs is fail(%d)", ret);
+		goto p_err;
+	}
+
 	ret = vb2_reqbufs(queue->vbq, request);
 	if (ret) {
 		err("vb2_reqbufs is fail(%d)", ret);
@@ -1382,9 +1388,8 @@ int fimc_is_video_s_ctrl(struct file *file,
 
 			size = sizeof(struct v4l2_plane) * buf->length;
 			planes = kmalloc(size, GFP_KERNEL);
-			if (IS_ERR_OR_NULL(planes)) {
-				if (planes)
-					mverr("kmalloc is fail(%p)", device, video, planes);
+			if (!planes) {
+				mverr("kmalloc is fail(%p)", device, video, planes);
 				kfree(buf);
 				ret = -EINVAL;
 				goto p_err;

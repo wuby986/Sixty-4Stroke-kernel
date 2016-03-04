@@ -33,10 +33,10 @@ static const u8 max77833_mask_reg[] = {
 	/* TODO: Need to check other INTMASK */
 	[TOP_INT] = MAX77833_PMIC_REG_SYSTEM_INT_MASK,
 	[CHG_INT] = MAX77833_CHG_REG_INT_MASK,
+	[FUEL_INT] = MAX77833_PMIC_REG_FG_INT_MASK,
 	[MUIC_INT1] = MAX77833_MUIC_REG_INTMASK1,
 	[MUIC_INT2] = MAX77833_MUIC_REG_INTMASK2,
 	[MUIC_INT3] = MAX77833_MUIC_REG_INTMASK3,
-//	[FUEL_INT] = MAX77833_FG_REG_INT_MASK,
 };
 
 static struct i2c_client *get_i2c(struct max77833_dev *max77833,
@@ -45,8 +45,8 @@ static struct i2c_client *get_i2c(struct max77833_dev *max77833,
 	switch (src) {
 	case TOP_INT:
 		return max77833->i2c;
-//	case FUEL_INT:
-//		return max77833->fuelgauge;
+	case FUEL_INT:
+		return max77833->fuelgauge;
 	case CHG_INT:
 		return max77833->i2c;
 	case MUIC_INT1 ... MUIC_MAX_INT:
@@ -64,10 +64,13 @@ struct max77833_irq_data {
 #define DECLARE_IRQ(idx, _group, _mask)		\
 	[(idx)] = { .group = (_group), .mask = (_mask) }
 static const struct max77833_irq_data max77833_irqs[] = {
+	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_T100C_INT,	TOP_INT, 1 << 0),
+	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_T120C_INT,	TOP_INT, 1 << 1),
+	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_T140C_INT,	TOP_INT, 1 << 2),
+	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_I2C_WD_INT,	TOP_INT, 1 << 3),
 	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_SYSUVLO_INT,	TOP_INT, 1 << 4),
-	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_SYSOVLO_INT,	TOP_INT, 1 << 5),
-	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_TSHDN_INT,	TOP_INT, 1 << 6),
-	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_TM_INT,		TOP_INT, 1 << 7),
+	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_MRSTB_INT,	TOP_INT, 1 << 5),
+	DECLARE_IRQ(MAX77833_SYSTEM_IRQ_TS_INT,		TOP_INT, 1 << 7),
 
 	DECLARE_IRQ(MAX77833_CHG_IRQ_BYP_I,	CHG_INT, 1 << 0),
 	DECLARE_IRQ(MAX77833_CHG_IRQ_BATP_I,	CHG_INT, 1 << 2),
@@ -75,18 +78,19 @@ static const struct max77833_irq_data max77833_irqs[] = {
 	DECLARE_IRQ(MAX77833_CHG_IRQ_CHG_I,	CHG_INT, 1 << 4),
 	DECLARE_IRQ(MAX77833_CHG_IRQ_WCIN_I,	CHG_INT, 1 << 5),
 	DECLARE_IRQ(MAX77833_CHG_IRQ_CHGIN_I,	CHG_INT, 1 << 6),
+	DECLARE_IRQ(MAX77833_CHG_IRQ_AICL_I,	CHG_INT, 1 << 7),
 
-//	DECLARE_IRQ(MAX77833_FG_IRQ_ALERT, FUEL_INT, 1 << 4),
+	DECLARE_IRQ(MAX77833_FG_IRQ_VMN_I, FUEL_INT, 1 << 0),
+	DECLARE_IRQ(MAX77833_FG_IRQ_SMN_I, FUEL_INT, 1 << 4),
 
 	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT1_RESERVED,	MUIC_INT1, 0 << 0),
-
 	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT2_RESERVED,	MUIC_INT2, 0 << 0),
 
-	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_IDRESINT,	MUIC_INT3, 1 << 0),
-	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_CHGTYPINT,	MUIC_INT3, 1 << 1),
-	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_CHGTYPRUNINT,MUIC_INT3, 1 << 2),
-	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_UICSYSMSGINT,MUIC_INT3, 1 << 6),
-	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_APCMDRESPINT,MUIC_INT3, 1 << 7),
+	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_IDRES_INT,		MUIC_INT3, 1 << 0),
+	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_CHGTYP_INT,		MUIC_INT3, 1 << 1),
+	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_CHGTYP_RUN_INT,	MUIC_INT3, 1 << 2),
+	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_SYSMSG_INT,		MUIC_INT3, 1 << 6),
+	DECLARE_IRQ(MAX77833_MUIC_IRQ_INT3_APCMD_RESP_INT,	MUIC_INT3, 1 << 7),
 };
 
 static void max77833_irq_lock(struct irq_data *data)
@@ -197,24 +201,27 @@ static irqreturn_t max77833_irq_thread(int irq, void *data)
 		 */
 		if (irq_reg[CHG_INT] &
 				max77833_irqs[MAX77833_CHG_IRQ_CHGIN_I].mask) {
-			u8 reg_data;
-			max77833_read_reg(max77833->i2c,
-				MAX77833_CHG_REG_INT_MASK, &reg_data);
-			reg_data |= (1 << 6);
-			max77833_write_reg(max77833->i2c,
-				MAX77833_CHG_REG_INT_MASK, reg_data);
+			max77833_update_reg(max77833->i2c,
+				MAX77833_CHG_REG_INT_MASK,
+				MAX77833_CHGIN_IM, MAX77833_CHGIN_IM);
+		}
+
+		if (!max77833->pmic_rev_pass5 &&
+			(irq_reg[CHG_INT] & max77833_irqs[MAX77833_CHG_IRQ_AICL_I].mask)) {
+			max77833_update_reg(max77833->i2c, MAX77833_CHG_REG_INT_MASK,
+					MAX77833_AICL_IM, MAX77833_AICL_IM);
+			max77833->irq_masks_cur[CHG_INT] |= 0x80;
+			pr_info("%s: disable aicl irq(not pass5)!\n", __func__);
+			return IRQ_NONE;
 		}
 	}
 
-#if 0
 	if (irq_src & MAX77833_IRQSRC_FG) {
-		pr_info("[%s] fuelgauge interrupt\n", __func__);
-		pr_info("[%s]IRQ_BASE(%d), NESTED_IRQ(%d)\n",
-			__func__, max77833->irq_base, max77833->irq_base + MAX77833_FG_IRQ_ALERT);
-		handle_nested_irq(max77833->irq_base + MAX77833_FG_IRQ_ALERT);
-		return IRQ_HANDLED;
+		ret = max77833_read_reg(max77833->i2c, MAX77833_PMIC_REG_FG_INT,
+					&irq_reg[FUEL_INT]);
+		pr_info("%s: fuelgauge interrupt(0x%02x)\n",
+				__func__, irq_reg[FUEL_INT]);
 	}
-#endif
 
 	if (irq_src & MAX77833_IRQSRC_TOP) {
 		/* TOP_INT */
@@ -359,7 +366,7 @@ int max77833_irq_init(struct max77833_dev *max77833)
 	}
 
 	i2c_data &= ~(MAX77833_IRQSRC_CHG);	/* Unmask charger interrupt */
-//	i2c_data &= ~(MAX77833_IRQSRC_FG);      /* Unmask fg interrupt */
+	i2c_data &= ~(MAX77833_IRQSRC_FG);      /* Unmask fg interrupt */
 	i2c_data &= ~(MAX77833_IRQSRC_MUIC);	/* Unmask muic interrupt */
 
 	max77833_write_reg(max77833->i2c, MAX77833_PMIC_REG_INTSRC_MASK,

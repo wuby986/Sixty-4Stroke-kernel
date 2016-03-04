@@ -200,16 +200,16 @@ static int is_lpc_available(unsigned int target_residency)
 	if (check_reg_status(check_reg_lpc, ARRAY_SIZE(check_reg_lpc)))
 		return false;
 
-	if (exynos_lpc_prepare())
+	if (exynos_check_aud_pwr() > AUD_PWR_LPA)
 		return false;
 
 	if (is_dll_on())
 		return false;
 
-	if (exynos_check_aud_pwr() > AUD_PWR_LPA)
+	if (pwm_check_enable_cnt())
 		return false;
 
-	if (pwm_check_enable_cnt())
+	if (exynos_lpc_prepare())
 		return false;
 
 	return true;
@@ -668,7 +668,8 @@ void exynos_prepare_sys_powerdown(enum sys_powerdown mode)
 	case SYS_ALPA:
 		exynos_ctrl_alpa(true);
 	case SYS_LPA:
-		exynos_lpa_enter();
+		if(!exynos_lpa_enter())
+			exynos_aud_alpa_notifier(true);
 		break;
 	case SYS_SLEEP:
 		break;
@@ -699,6 +700,7 @@ void exynos_wakeup_sys_powerdown(enum sys_powerdown mode, bool early_wakeup)
 		exynos_ctrl_alpa(false);
 	case SYS_LPA:
 		exynos_lpa_exit();
+		exynos_aud_alpa_notifier(false);
 		break;
 	case SYS_SLEEP:
 #if defined(CONFIG_SOC_EXYNOS7420)
@@ -729,6 +731,9 @@ struct check_reg check_reg_lpm[LIST_MAX_LENGTH];
  */
 int determine_lpm(void)
 {
+	if (!((exynos_check_aud_pwr() == AUD_PWR_LPA) || (exynos_check_aud_pwr() == AUD_PWR_ALPA)))
+		return SYS_AFTR;
+
 	if (exynos_lpa_prepare()) {
 		lpa_blocking_counter(0);
 		return SYS_AFTR;

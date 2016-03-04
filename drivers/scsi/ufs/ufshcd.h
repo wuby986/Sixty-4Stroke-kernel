@@ -462,6 +462,7 @@ struct ufs_hba {
 	struct ufs_init_prefetch init_prefetch_data;
 
 	/* Work Queues */
+	struct workqueue_struct *ufshcd_workq;
 	struct work_struct eh_work;
 	struct work_struct eeh_work;
 
@@ -514,7 +515,8 @@ struct ufs_hba {
 	struct device_attribute bkops_en_attr;
 	struct device_attribute capabilities_attr;
 
-	u32 self_test;
+	struct buffer_head *self_test_bh;
+	uint32_t self_test_mode;
 	struct ufshcd_sg_entry *ucd_prdt_ptr_st;
 
 	/* UFSHCI doesn't support DWORD size in UTRD */

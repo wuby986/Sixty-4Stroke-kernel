@@ -31,7 +31,7 @@ enum exynos7420_clks {
 	mout_aud_pll, mout_top0_mfc_pll, mout_top0_cci_pll, mout_top0_bus1_pll,
 	mout_top0_bus0_pll, dout_sclk_isp_mpwm, dout_sclk_isp_pwm,
 
-	isp_pll = 35, cam_pll, bus0_pll, bus1_pll, cci_pll, mfc_pll, aud_pll, mif_pll,
+	isp_pll = 35, cam_pll, bus0_pll, bus1_pll, cci_pll, mfc_pll, aud_pll, mif_pll, dphy_pll,
 
 	clkout = 45,
 	bus_pll_g3d = 50,
@@ -64,9 +64,15 @@ enum exynos7420_clks {
 	um_decon1_vclk, m_decon1_vclk, d_decon1_vclk,
 	aclk_lh_disp0 = 230, aclk_lh_disp1, aclk_disp, pclk_disp, rgb_vclk0,
 	rgb_vclk1, mipi1_rx, mipi1_bit,
+#ifdef CONFIG_EXYNOS_DECON_DUAL_DSI
+	mout_sclk_decon_int_eclk = 240, mout_bus0_pll_top0, dout_sclk_decon_int_eclk,
+	um_decon0_eclk, mout_sclk_decon_ext_eclk, dout_sclk_decon_ext_eclk,
+#endif
 	disp_last = 299,
 
 	/* number for ccore 300 */
+	aclk_lh_g3d0 = 300, aclk_lh_g3d1,
+
 	/* number for audio starts from 400 */
 	aclk_dmac = 400, aclk_sramc, aclk_audnp_133,
 	aclk_acel_lh_async_si_top_133, aclk_smmu_aud,
@@ -634,6 +640,11 @@ struct samsung_pll_rate_table table_apollo[] = {
 };
 struct samsung_pll_rate_table table_aud[] = {
 	{491520000U,	1, 20,	0, 31457},
+	{479232000U,    2, 40, 0, -4194},
+	{442368000U,    2, 37, 0, -8913},
+	{393216000U,    3, 98, 1, 19923},
+	{351000000U,    2, 59, 1, -32768},
+	{320000000U,    3, 80, 1, 0},
 	{196608000U,	1, 33,	2, -15204},
 	{0,		0, 0, 0, 0},
 };
@@ -675,6 +686,7 @@ struct samsung_pll_rate_table table_disp[] = {
 	{266000000U,	3, 67, 1, -32768},
 	{252000000U,	2, 42, 1, 0},
 	{240000000U,	1, 20, 1, 0},
+	{142000000U,	3, 71, 2, 0},
 	{133000000U,	3, 67, 2, -32768},
 	{126000000U,	1, 21, 2, 0},
 	{96000000U,	1, 32, 3, 0},
@@ -699,16 +711,21 @@ struct samsung_pll_rate_table table_cam[] = {
 
 struct samsung_pll_rate_table table_mif[] = {
 	{3104000000U,	3, 388, 0, 0},
+	{2928000000U,	2, 244, 0, 0},
 	{2912000000U,	3, 364, 0, 0},
 	{2528000000U,	3, 316, 0, 0},
 	{2136000000U,	2, 178, 0, 0},
 	{2052000000U, 	2, 171, 0, 0},
+	{1672000000U,	3, 209, 0, 0},
 	{1656000000U,	3, 207, 0, 0},
+	{1270000000U,	6, 635, 1, 0},
 	{1264000000U,	3, 316, 1, 0},
 	{1086000000U,	2, 181, 1, 0},
+	{836000000U,	3, 209, 1, 0},
 	{832000000U,	3, 208, 1, 0},
 	{696000000U,	3, 348, 2, 0},
 	{552000000U,	3, 276, 2, 0},
+	{518000000U,	3, 259, 2, 0},
 	{334000000U,	3, 334, 3, 0},
 	{266000000U,	3, 266, 3, 0},
 	{200000000U,	3, 200, 3, 0},
@@ -719,6 +736,13 @@ struct samsung_pll_rate_table table_hsic[] = {
 	{480000000U,	6, 240, 1, 0},
 	{0,		0, 0, 0, 0},
 };
+
+struct samsung_pll_rate_table table_dphy[] = {
+	{110000000U,	3, 275, 1, 0},
+	{102600000U,	2, 171, 1, 0},
+	{0,		0, 0, 0, 0},
+};
+
 
 /*
  * parent names are defined as array like below.
@@ -855,6 +879,10 @@ static struct samsung_composite_pll exynos7420_pll_clks[] __refdata = {
 			EXYNOS7420_MUX_SEL_FSYS00, 28, \
 			EXYNOS7420_MUX_STAT_FSYS00, 28, \
 			table_hsic, 0, CLK_IGNORE_UNUSED, NULL),
+	PLL(dphy_pll, "dphy_pll", pll_1450x, DPHY_LOCK, DPHY_CON, DPHY_CON, 31, \
+			DPHY_CON, 31, \
+			DPHY_CON, 29, \
+			table_dphy, 0, CLK_IGNORE_UNUSED, "dphy_pll"),
 };
 
 static struct samsung_fixed_rate exynos7420_fixed_rate_clks[] __initdata = {
@@ -1010,10 +1038,18 @@ static struct samsung_composite_mux exynos7420_mux_clks[] __refdata = {
 	MUX(none, "mout_aclk_mfc_532", topc_group1, \
 			EXYNOS7420_MUX_SEL_TOPC3, 8, 2, \
 			EXYNOS7420_MUX_STAT_TOPC3, 8, 4, 0, "mout_aclk_mfc_532"),
+#ifdef CONFIG_EXYNOS_DECON_DUAL_DSI
+	/* top0 block */
+	MUX(mout_bus0_pll_top0, "mout_bus0_pll_top0", mout_bus0_pll_top0_p, \
+			EXYNOS7420_MUX_SEL_TOP01, 16, 1, \
+			EXYNOS7420_MUX_STAT_TOP01, 16, 3, 0, "mout_bus0_pll_top0"),
+#else
 	/* top0 block */
 	MUX(none, "mout_bus0_pll_top0", mout_bus0_pll_top0_p, \
 			EXYNOS7420_MUX_SEL_TOP01, 16, 1, \
 			EXYNOS7420_MUX_STAT_TOP01, 16, 3, 0, "mout_bus0_pll_top0"),
+#endif
+
 	MUX(none, "mout_bus1_pll_top0", mout_bus1_pll_top0_p, \
 			EXYNOS7420_MUX_SEL_TOP01, 12, 1, \
 			EXYNOS7420_MUX_STAT_TOP01, 12, 3, 0, "mout_bus1_pll_top0"),
@@ -1115,12 +1151,21 @@ static struct samsung_composite_mux exynos7420_mux_clks[] __refdata = {
 	MUX(none, "mout_sclk_uart3", top0_group1, \
 			EXYNOS7420_MUX_SEL_TOP0_PERIC3, 4, 2, \
 			EXYNOS7420_MUX_STAT_TOP0_PERIC3, 4, 4, 0, NULL),
+#ifdef CONFIG_EXYNOS_DECON_DUAL_DSI
+	MUX(mout_sclk_decon_int_eclk, "mout_sclk_decon_int_eclk", top0_group1, \
+			EXYNOS7420_MUX_SEL_TOP0_DISP, 28, 2, \
+			EXYNOS7420_MUX_STAT_TOP0_DISP, 28, 4, 0, "m_sclk_decon0_eclk"),
+	MUX(mout_sclk_decon_ext_eclk, "mout_sclk_decon_ext_eclk", top0_group1, \
+			EXYNOS7420_MUX_SEL_TOP0_DISP, 24, 2, \
+			EXYNOS7420_MUX_STAT_TOP0_DISP, 24, 4, 0, NULL),
+#else
 	MUX(none, "mout_sclk_decon_int_eclk", top0_group1, \
 			EXYNOS7420_MUX_SEL_TOP0_DISP, 28, 2, \
 			EXYNOS7420_MUX_STAT_TOP0_DISP, 28, 4, 0, "m_sclk_decon0_eclk"),
 	MUX(none, "mout_sclk_decon_ext_eclk", top0_group1, \
 			EXYNOS7420_MUX_SEL_TOP0_DISP, 24, 2, \
 			EXYNOS7420_MUX_STAT_TOP0_DISP, 24, 4, 0, NULL),
+#endif
 	MUX(none, "mout_sclk_decon_vclk", top0_group1, \
 			EXYNOS7420_MUX_SEL_TOP0_DISP, 20, 2, \
 			EXYNOS7420_MUX_STAT_TOP0_DISP, 20, 4, 0, NULL),
@@ -1446,12 +1491,21 @@ static struct samsung_composite_divider exynos7420_div_clks[] __refdata = {
 	DIV(baud3, "dout_sclk_uart3", "mout_sclk_uart3", \
 			EXYNOS7420_DIV_TOP0_PERIC3, 4, 4, \
 			EXYNOS7420_DIV_STAT_TOP0_PERIC3, 4, 1, 0, NULL),
+#ifdef CONFIG_EXYNOS_DECON_DUAL_DSI
+	DIV(dout_sclk_decon_int_eclk, "dout_sclk_decon_int_eclk", "mout_sclk_decon_int_eclk", \
+			EXYNOS7420_DIV_TOP0_DISP, 28, 4, \
+			EXYNOS7420_DIV_STAT_TOP0_DISP, 28, 1, 0, "dout_sclk_decon_int_eclk"),
+	DIV(dout_sclk_decon_ext_eclk, "dout_sclk_decon_ext_eclk", "mout_sclk_decon_ext_eclk", \
+			EXYNOS7420_DIV_TOP0_DISP, 24, 4, \
+			EXYNOS7420_DIV_STAT_TOP0_DISP, 24, 1, 0, "dout_sclk_decon_ext_eclk"),
+#else
 	DIV(none, "dout_sclk_decon_int_eclk", "mout_sclk_decon_int_eclk", \
 			EXYNOS7420_DIV_TOP0_DISP, 28, 4, \
 			EXYNOS7420_DIV_STAT_TOP0_DISP, 28, 1, 0, "dout_sclk_decon_int_eclk"),
 	DIV(none, "dout_sclk_decon_ext_eclk", "mout_sclk_decon_ext_eclk", \
 			EXYNOS7420_DIV_TOP0_DISP, 24, 4, \
 			EXYNOS7420_DIV_STAT_TOP0_DISP, 24, 1, 0, "dout_sclk_decon_ext_eclk"),
+#endif			
 	DIV(none, "dout_sclk_decon_vclk", "mout_sclk_decon_vclk", \
 			EXYNOS7420_DIV_TOP0_DISP, 20, 4, \
 			EXYNOS7420_DIV_STAT_TOP0_DISP, 20, 1, 0, "dout_sclk_decon_vclk"),
@@ -1792,9 +1846,15 @@ static struct samsung_usermux exynos7420_usermux_clks[] __initdata = {
 	USERMUX(none, "usermux_sclk_dsd", "top_sclk_dsd", \
 			EXYNOS7420_MUX_SEL_DISP1, 16, \
 			EXYNOS7420_MUX_STAT_DISP1, 16, 0, NULL),
+#ifdef CONFIG_EXYNOS_DECON_DUAL_DSI
+	USERMUX(um_decon0_eclk, "usermux_sclk_decon_int_eclk", "top_sclk_decon_int_eclk", \
+			EXYNOS7420_MUX_SEL_DISP1, 28, \
+			EXYNOS7420_MUX_STAT_DISP1, 28, 0, "um_decon0_eclk"),
+#else
 	USERMUX(none, "usermux_sclk_decon_int_eclk", "top_sclk_decon_int_eclk", \
 			EXYNOS7420_MUX_SEL_DISP1, 28, \
 			EXYNOS7420_MUX_STAT_DISP1, 28, 0, "um_decon0_eclk"),
+#endif
 	USERMUX(none, "usermux_sclk_decon_vclk", "top_sclk_decon_vclk", \
 			EXYNOS7420_MUX_SEL_DISP1, 20, \
 			EXYNOS7420_MUX_STAT_DISP1, 20, 0, NULL),
@@ -2334,7 +2394,7 @@ static struct samsung_gate exynos7420_gate_clks[] __initdata = {
 	GATE(hsi2c6, "pclk_hsi2c6", "usermux_aclk_peric1_66", \
 			EXYNOS7420_ENABLE_PCLK_PERIC1, 6, 0, NULL),
 	GATE(hsi2c7, "pclk_hsi2c7", "usermux_aclk_peric1_66", \
-			EXYNOS7420_ENABLE_PCLK_PERIC1, 7, 0, NULL),
+			EXYNOS7420_ENABLE_PCLK_PERIC1, 7, 0, "pclk-hsi2c7"),
 	GATE(hsi2c8, "pclk_hsi2c8", "usermux_aclk_peric1_66", \
 			EXYNOS7420_ENABLE_PCLK_PERIC1, 8, 0, NULL),
 	GATE(pclk_spi0, "pclk_spi0", "usermux_aclk_peric1_66", \
@@ -2344,9 +2404,9 @@ static struct samsung_gate exynos7420_gate_clks[] __initdata = {
 	GATE(pclk_spi2, "pclk_spi2", "usermux_aclk_peric1_66", \
 			EXYNOS7420_ENABLE_PCLK_PERIC1, 14, 0, NULL),
 	GATE(pclk_spi3, "pclk_spi3", "usermux_aclk_peric1_66", \
-			EXYNOS7420_ENABLE_PCLK_PERIC1, 15, 0, NULL),
+			EXYNOS7420_ENABLE_PCLK_PERIC1, 15, 0, "spi3-pclk"),
 	GATE(pclk_spi4, "pclk_spi4", "usermux_aclk_peric1_66", \
-			EXYNOS7420_ENABLE_PCLK_PERIC1, 16, 0, NULL),
+			EXYNOS7420_ENABLE_PCLK_PERIC1, 16, 0, "fp-spi-pclk"),
 	GATE(pclk_spi5, "pclk_spi5", "usermux_aclk_peric1_66", \
 			EXYNOS7420_ENABLE_PCLK_PERIC1, 20, 0, NULL),
 	GATE(pclk_i2s1, "pclk_i2s1", "usermux_aclk_peric1_66", \
@@ -2366,9 +2426,9 @@ static struct samsung_gate exynos7420_gate_clks[] __initdata = {
 	GATE(sclk_spi2, "sclk_spi2", "usermux_sclk_spi2", \
 			EXYNOS7420_ENABLE_SCLK_PERIC10, 14, CLK_SET_RATE_PARENT, NULL),
 	GATE(sclk_spi3, "sclk_spi3", "usermux_sclk_spi3", \
-			EXYNOS7420_ENABLE_SCLK_PERIC10, 15, CLK_SET_RATE_PARENT, NULL),
+			EXYNOS7420_ENABLE_SCLK_PERIC10, 15, CLK_SET_RATE_PARENT, "spi3-sclk"),
 	GATE(sclk_spi4, "sclk_spi4", "usermux_sclk_spi4", \
-			EXYNOS7420_ENABLE_SCLK_PERIC10, 16, CLK_SET_RATE_PARENT, NULL),
+			EXYNOS7420_ENABLE_SCLK_PERIC10, 16, CLK_SET_RATE_PARENT, "fp-spi-sclk"),
 	GATE(sclk_spi5, "sclk_spi5", "usermux_sclk_spi5", \
 			EXYNOS7420_ENABLE_SCLK_PERIC10, 20, CLK_SET_RATE_PARENT, NULL),
 	GATE(none, "sclk_spdif", "top_sclk_spdif", \
@@ -2737,6 +2797,10 @@ static struct samsung_gate exynos7420_gate_clks[] __initdata = {
 	/* ccore */
 	GATE(none, "aclk_cci", "usermux_aclk_ccore_532", \
 			EXYNOS7420_ENABLE_ACLK_CCORE0, 0, CLK_GATE_ENABLE, NULL),
+	GATE(aclk_lh_g3d0, "aclk_lh_g3d0", "usermux_aclk_ccore_532", \
+			EXYNOS7420_ENABLE_ACLK_CCORE0, 22, CLK_IGNORE_UNUSED, NULL),
+	GATE(aclk_lh_g3d1, "aclk_lh_g3d1", "usermux_aclk_ccore_532", \
+			EXYNOS7420_ENABLE_ACLK_CCORE0, 23, CLK_IGNORE_UNUSED, NULL),
 	GATE(rtc, "pclk_rtc", "usermux_aclk_ccore_133", \
 			EXYNOS7420_ENABLE_PCLK_CCORE, 8, 0, NULL),
 	GATE(none, "aclk_noc_p_ccore", "usermux_aclk_ccore_133", \

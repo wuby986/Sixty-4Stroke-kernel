@@ -29,9 +29,6 @@
 #include <linux/regulator/consumer.h>
 #include <linux/delay.h>
 #include <mach/exynos-fimc-is-sensor.h>
-#ifdef CONFIG_OIS_FW_UPDATE_THREAD_USE
-#include <linux/kthread.h>
-#endif
 #include <linux/pinctrl/pinctrl-samsung.h>
 
 #include "fimc-is-core.h"
@@ -47,6 +44,7 @@
 #define FIMC_IS_OIS_SDCARD_PATH		"/data/media/0/"
 #define FIMC_IS_OIS_DEV_NAME		"exynos-fimc-is-ois"
 #define FIMC_OIS_FW_NAME_SEC		"ois_fw_sec.bin"
+#define FIMC_OIS_FW_NAME_SEC_2		"ois_fw_sec_2.bin"
 #define FIMC_OIS_FW_NAME_DOM		"ois_fw_dom.bin"
 #define OIS_BOOT_FW_SIZE	(1024 * 4)
 #define OIS_PROG_FW_SIZE	(1024 * 24)
@@ -60,6 +58,8 @@
 #define OIS_BIN_LEN		28672
 #define OIS_BIN_HEADER		28658
 #define OIS_FW_HEADER_SIZE		6
+#define OIS_GYRO_SCALE_FACTOR_IDG	175
+#define OIS_GYRO_SCALE_FACTOR_K2G	131
 static u8 bootCode[OIS_BOOT_FW_SIZE] = {0,};
 static u8 progCode[OIS_PROG_FW_SIZE] = {0,};
 
@@ -69,29 +69,33 @@ static struct fimc_is_ois_info ois_uinfo;
 static struct fimc_is_ois_exif ois_exif_data;
 static bool fw_sdcard;
 static bool not_crc_bin;
-#ifdef CONFIG_OIS_FW_UPDATE_THREAD_USE
-static struct task_struct *ois_ts;
-#endif
 
-static void fimc_is_ois_i2c_config(struct i2c_client *client, bool onoff)
+static int fimc_is_ois_i2c_config(struct i2c_client *client, bool onoff)
 {
 	struct pinctrl *pinctrl_i2c = NULL;
-	struct device *i2c_dev = client->dev.parent->parent;
-	struct fimc_is_device_ois *ois_device = i2c_get_clientdata(client);
+	struct device *i2c_dev = NULL;
+	struct fimc_is_device_ois *ois_device;
 	struct fimc_is_ois_gpio *gpio;
 
+	if (!client) {
+		pr_info("%s: client is null\n", __func__);
+		return -ENODEV;
+	}
+
+	i2c_dev = client->dev.parent->parent;
+	ois_device = i2c_get_clientdata(client);
 	gpio = &ois_device->gpio;
 
 	if (ois_device->ois_hsi2c_status != onoff) {
-		info("%s : ois_hsi2c_stauts(%d),onoff(%d)\n",__func__,
-			ois_device->ois_hsi2c_status, onoff);
-
+		info("%s : ois_hsi2c_stauts(%d),onoff(%d), use_i2c_pinctrl(%d)\n",
+			__func__, ois_device->ois_hsi2c_status, onoff, gpio->use_i2c_pinctrl);
 		if (onoff) {
-			pin_config_set(gpio->pinname, gpio->sda,
-				PINCFG_PACK(PINCFG_TYPE_FUNC, 0));
-			pin_config_set(gpio->pinname, gpio->scl,
-				PINCFG_PACK(PINCFG_TYPE_FUNC, 0));
-
+			if(gpio->use_i2c_pinctrl) {
+				pin_config_set(gpio->pinname, gpio->sda,
+					PINCFG_PACK(PINCFG_TYPE_FUNC, gpio->pinfunc_on));
+				pin_config_set(gpio->pinname, gpio->scl,
+					PINCFG_PACK(PINCFG_TYPE_FUNC, gpio->pinfunc_on));
+			}
 			pinctrl_i2c = devm_pinctrl_get_select(i2c_dev, "on_i2c");
 			if (IS_ERR_OR_NULL(pinctrl_i2c)) {
 				printk(KERN_ERR "%s: Failed to configure i2c pin\n", __func__);
@@ -105,15 +109,17 @@ static void fimc_is_ois_i2c_config(struct i2c_client *client, bool onoff)
 			} else {
 				devm_pinctrl_put(pinctrl_i2c);
 			}
-
-			pin_config_set(gpio->pinname, gpio->sda,
-				PINCFG_PACK(PINCFG_TYPE_FUNC, 2));
-			pin_config_set(gpio->pinname, gpio->scl,
-				PINCFG_PACK(PINCFG_TYPE_FUNC, 2));
+			if(gpio->use_i2c_pinctrl) {
+				pin_config_set(gpio->pinname, gpio->sda,
+					PINCFG_PACK(PINCFG_TYPE_FUNC, gpio->pinfunc_off));
+				pin_config_set(gpio->pinname, gpio->scl,
+					PINCFG_PACK(PINCFG_TYPE_FUNC, gpio->pinfunc_off));
+			}
 		}
 		ois_device->ois_hsi2c_status = onoff;
 	}
 
+	return 0;
 }
 
 int fimc_is_ois_i2c_read(struct i2c_client *client, u16 addr, u8 *data)
@@ -263,38 +269,6 @@ static int fimc_is_ois_i2c_read_multi(struct i2c_client *client, u16 addr, u8 *d
 	return 0;
 }
 
-bool fimc_is_ois_check_sensor(struct fimc_is_core *core)
-{
-	int i = 0;
-	bool ret = false;
-	int retry_count = 20;
-
-	do {
-		ret = false;
-		for (i = 0; i < FIMC_IS_SENSOR_COUNT; i++) {
-			if (!core->sensor[i].is_probed) {
-				ret = true;
-				break;
-			}
-		}
-
-		if (i == FIMC_IS_SENSOR_COUNT && ret == false) {
-			info("Retry count = %d\n", retry_count);
-			break;
-		}
-
-		mdelay(100);
-		if (retry_count > 0) {
-			--retry_count;
-		} else {
-			err("Could not get sensor before start ois fw update routine.\n");
-			break;
-		}
-	} while (ret);
-
-	return ret;
-}
-
 int fimc_is_ois_gpio_on(struct fimc_is_core *core)
 {
 	int ret = 0;
@@ -302,17 +276,6 @@ int fimc_is_ois_gpio_on(struct fimc_is_core *core)
 	struct fimc_is_module_enum *module = NULL;
 	int sensor_id = 0;
 	int i = 0;
-	struct device *dev = &core->ischain[0].pdev->dev;
-
-	ret = fimc_is_sec_run_fw_sel(dev, SENSOR_POSITION_REAR);
-	if (ret) {
-		err("fimc_is_sec_run_fw_sel for rear is fail(%d)", ret);
-	}
-
-	ret = fimc_is_sec_run_fw_sel(dev, SENSOR_POSITION_FRONT);
-	if (ret) {
-		err("fimc_is_sec_run_fw_sel for front is fail(%d)", ret);
-	}
 
 	sensor_id = core->pdata->rear_sensor_id;
 
@@ -320,11 +283,12 @@ int fimc_is_ois_gpio_on(struct fimc_is_core *core)
 		fimc_is_search_sensor_module(&core->sensor[i], sensor_id, &module);
 		if (module)
 			break;
-		else {
-			err("%s: Could not find sensor id.", __func__);
-			ret = -EINVAL;
-			goto p_err;
-		}
+	}
+
+	if (!module) {
+		err("%s: Could not find sensor id.", __func__);
+		ret = -EINVAL;
+		goto p_err;
 	}
 
 	module_pdata = module->pdata;
@@ -359,11 +323,12 @@ int fimc_is_ois_gpio_off(struct fimc_is_core *core)
 		fimc_is_search_sensor_module(&core->sensor[i], sensor_id, &module);
 		if (module)
 			break;
-		else {
-			err("%s: Could not find sensor id.", __func__);
-			ret = -EINVAL;
-			goto p_err;
-		}
+	}
+
+	if (!module) {
+		err("%s: Could not find sensor id.", __func__);
+		ret = -EINVAL;
+		goto p_err;
 	}
 
 	module_pdata = module->pdata;
@@ -513,6 +478,7 @@ void fimc_is_ois_offset_test(struct fimc_is_core *core, long *raw_data_x, long *
 	u8 val = 0, x = 0, y = 0;
 	int x_sum = 0, y_sum = 0, sum = 0;
 	int retries = 0, avg_count = 20;
+	int scale_factor = 0;
 	struct exynos_platform_fimc_is *core_pdata = NULL;
 
 	core_pdata = dev_get_platdata(fimc_is_dev);
@@ -522,6 +488,13 @@ void fimc_is_ois_offset_test(struct fimc_is_core *core, long *raw_data_x, long *
 	}
 
 	info("%s : E\n", __FUNCTION__);
+
+	if (ois_minfo.header_ver[0] == '6') {
+		scale_factor = OIS_GYRO_SCALE_FACTOR_IDG;
+	} else {
+		scale_factor = OIS_GYRO_SCALE_FACTOR_K2G;
+	}
+
 	if (core_pdata->use_ois_hsi2c) {
 	    fimc_is_ois_i2c_config(core->client1, true);
 	}
@@ -557,7 +530,7 @@ void fimc_is_ois_offset_test(struct fimc_is_core *core, long *raw_data_x, long *
 		sum += x_sum;
 	}
 	sum = sum * 10 / avg_count;
-	*raw_data_x = sum * 1000 / 175 / 10;
+	*raw_data_x = sum * 1000 / scale_factor / 10;
 
 	retries = avg_count;
 	for (i = 0; i < retries; retries--) {
@@ -571,7 +544,7 @@ void fimc_is_ois_offset_test(struct fimc_is_core *core, long *raw_data_x, long *
 		sum += y_sum;
 	}
 	sum = sum * 10 / avg_count;
-	*raw_data_y = sum * 1000 / 175 / 10;
+	*raw_data_y = sum * 1000 / scale_factor / 10;
 
 	if (core_pdata->use_ois_hsi2c) {
 	    fimc_is_ois_i2c_config(core->client1, false);
@@ -588,6 +561,7 @@ void fimc_is_ois_get_offset_data(struct fimc_is_core *core, long *raw_data_x, lo
 	u8 val = 0, x = 0, y = 0;
 	int x_sum = 0, y_sum = 0, sum = 0;
 	int retries = 0, avg_count = 20;
+	int scale_factor = 0;
 	struct exynos_platform_fimc_is *core_pdata = NULL;
 
 	core_pdata = dev_get_platdata(fimc_is_dev);
@@ -597,6 +571,13 @@ void fimc_is_ois_get_offset_data(struct fimc_is_core *core, long *raw_data_x, lo
 	}
 
 	info("%s : E\n", __FUNCTION__);
+
+	if (ois_minfo.header_ver[0] == '6') {
+		scale_factor = OIS_GYRO_SCALE_FACTOR_IDG;
+	} else {
+		scale_factor = OIS_GYRO_SCALE_FACTOR_K2G;
+	}
+
 	if (core_pdata->use_ois_hsi2c) {
 	    fimc_is_ois_i2c_config(core->client1, true);
 	}
@@ -613,7 +594,7 @@ void fimc_is_ois_get_offset_data(struct fimc_is_core *core, long *raw_data_x, lo
 		sum += x_sum;
 	}
 	sum = sum * 10 / avg_count;
-	*raw_data_x = sum * 1000 / 175 / 10;
+	*raw_data_x = sum * 1000 / scale_factor / 10;
 
 	sum = 0;
 	retries = avg_count;
@@ -628,7 +609,7 @@ void fimc_is_ois_get_offset_data(struct fimc_is_core *core, long *raw_data_x, lo
 		sum += y_sum;
 	}
 	sum = sum * 10 / avg_count;
-	*raw_data_y = sum * 1000 / 175 / 10;
+	*raw_data_y = sum * 1000 / scale_factor / 10;
 
 	if (core_pdata->use_ois_hsi2c) {
 	    fimc_is_ois_i2c_config(core->client1, false);
@@ -1030,6 +1011,8 @@ bool fimc_is_ois_fw_version(struct fimc_is_core *core)
 	memcpy(ois_minfo.header_ver, version, 6);
 	core->ois_ver_read = true;
 
+	fimc_is_ois_fw_status(core);
+
 	return true;
 
 exit:
@@ -1317,10 +1300,18 @@ bool fimc_is_ois_check_fw(struct fimc_is_core *core)
 	}
 	fimc_is_ois_read_userdata(core);
 
-	if (ois_minfo.header_ver[2] == 'C' || ois_minfo.header_ver[2] == 'E') {
-		ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_DOM, &buf);
-	} else if (ois_minfo.header_ver[2] == 'D' || ois_minfo.header_ver[2] == 'F') {
-		ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_SEC, &buf);
+	if (ois_minfo.header_ver[0] == '6') {
+		if (ois_minfo.header_ver[2] == 'C' || ois_minfo.header_ver[2] == 'E'
+			|| ois_minfo.header_ver[2] == 'G' || ois_minfo.header_ver[2] == 'I') {
+			ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_DOM, &buf);
+		} else if (ois_minfo.header_ver[2] == 'D' || ois_minfo.header_ver[2] == 'F'
+			|| ois_minfo.header_ver[2] == 'H' || ois_minfo.header_ver[2] == 'J') {
+			ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_SEC, &buf);
+		}
+	} else if (ois_minfo.header_ver[0] == '8') {
+		if (ois_minfo.header_ver[2] == 'H' || ois_minfo.header_ver[2] == 'J') {
+			ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_SEC_2, &buf);
+		}
 	} else {
 		info("Module FW version does not matched with phone FW version.\n");
 		strcpy(ois_pinfo.header_ver, "NULL");
@@ -1393,10 +1384,10 @@ u8 fimc_is_ois_read_cal_checksum(struct fimc_is_core *core)
 	return status;
 }
 
-void fimc_is_ois_fw_status(struct fimc_is_core *core, u8 *checksum, u8 *caldata)
+void fimc_is_ois_fw_status(struct fimc_is_core *core)
 {
-	*checksum = fimc_is_ois_read_status(core);
-	*caldata = fimc_is_ois_read_cal_checksum(core);
+	ois_minfo.checksum = fimc_is_ois_read_status(core);
+	ois_minfo.caldata = fimc_is_ois_read_cal_checksum(core);
 
 	return;
 }
@@ -1431,7 +1422,7 @@ bool fimc_is_ois_crc_check(struct fimc_is_core *core, char *buf)
 	}
 }
 
-void fimc_is_ois_fw_update(struct fimc_is_core *core)
+void fimc_is_ois_fw_update_impl(struct fimc_is_core *core)
 {
 	u8 SendData[256], RcvData;
 	u16 RcvDataShort = 0;
@@ -1466,10 +1457,18 @@ void fimc_is_ois_fw_update(struct fimc_is_core *core)
 	}
 	fimc_is_ois_read_userdata(core);
 
-	if (ois_minfo.header_ver[2] == 'C' || ois_minfo.header_ver[2] == 'E') {
-		ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_DOM, &buf);
-	} else if (ois_minfo.header_ver[2] == 'D' || ois_minfo.header_ver[2] == 'F') {
-		ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_SEC, &buf);
+	if (ois_minfo.header_ver[0] == '6') {
+		if (ois_minfo.header_ver[2] == 'C' || ois_minfo.header_ver[2] == 'E'
+			|| ois_minfo.header_ver[2] == 'G' || ois_minfo.header_ver[2] == 'I') {
+			ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_DOM, &buf);
+		} else if (ois_minfo.header_ver[2] == 'D' || ois_minfo.header_ver[2] == 'F'
+			|| ois_minfo.header_ver[2] == 'H' || ois_minfo.header_ver[2] == 'J') {
+			ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_SEC, &buf);
+		}
+	} else if (ois_minfo.header_ver[0] == '8') {
+		if (ois_minfo.header_ver[2] == 'H' || ois_minfo.header_ver[2] == 'J') {
+			ret = fimc_is_ois_open_fw(core, FIMC_OIS_FW_NAME_SEC_2, &buf);
+		}
 	} else {
 		info("Module FW version does not matched with phone FW version.\n");
 		strcpy(ois_pinfo.header_ver, "NULL");
@@ -1480,7 +1479,8 @@ void fimc_is_ois_fw_update(struct fimc_is_core *core)
 		goto p_err;
 	}
 
-	if (ois_minfo.header_ver[2] < 'E') {
+	if (ois_minfo.header_ver[2] != CAMERA_OIS_DOM_UPDATE_VERSION
+		&& ois_minfo.header_ver[2] != CAMERA_OIS_SEC_UPDATE_VERSION) {
 		info("Do not update ois Firmware. FW version is low.\n");
 		goto p_err;
 	}
@@ -1693,39 +1693,15 @@ p_err:
 	return;
 }
 
-#ifdef CONFIG_OIS_FW_UPDATE_THREAD_USE
-int fimc_is_ois_thread(void *data)
+void fimc_is_ois_fw_update(struct fimc_is_core *core)
 {
-	struct fimc_is_core *core = data;
-	bool ret = false;
-
-	ret = fimc_is_ois_check_sensor(core);
-	if (ret) {
-		err("Do not update ois fw update. Check sensor failed!\n");
-		return -EINVAL;
-	} else {
-		info("Start ois fw update. Check sensor success!\n");
-	}
-
 	fimc_is_ois_gpio_on(core);
 	msleep(150);
-	fimc_is_ois_fw_update(core);
+	fimc_is_ois_fw_update_impl(core);
 	fimc_is_ois_gpio_off(core);
-
-	return 0;
-}
-
-void fimc_is_ois_init_thread(struct fimc_is_core *core)
-{
-	info("OIS fimc_is_ois_init_thread\n");
-
-	ois_ts = kthread_run(fimc_is_ois_thread, core, "ois_thread");
-	if (IS_ERR_OR_NULL(ois_ts))
-		err("failed to create a thread for ois fw update\n");
 
 	return;
 }
-#endif /* CONFIG_OIS_FW_UPDATE_THREAD_USE */
 
 int fimc_is_ois_parse_dt(struct i2c_client *client)
 {
@@ -1735,29 +1711,47 @@ int fimc_is_ois_parse_dt(struct i2c_client *client)
 	struct device_node *np = client->dev.of_node;
 
 	gpio = &device->gpio;
+	gpio->use_i2c_pinctrl = of_property_read_bool(np, "use_i2c_pinctrl");
 
-	ret = of_property_read_string(np, "fimc_is_ois_sda", (const char **) &gpio->sda);
-	if (ret) {
-		err("ois gpio: fail to read, ois_parse_dt\n");
-		ret = -ENODEV;
-		goto p_err;
+	if(gpio->use_i2c_pinctrl) {
+		ret = of_property_read_string(np, "fimc_is_ois_sda", (const char **) &gpio->sda);
+		if (ret) {
+			err("ois gpio: fail to read, ois_parse_dt\n");
+			ret = -ENODEV;
+			goto p_err;
+		}
+
+		ret = of_property_read_string(np, "fimc_is_ois_scl",(const char **) &gpio->scl);
+		if (ret) {
+			err("ois gpio: fail to read, ois_parse_dt\n");
+			ret = -ENODEV;
+			goto p_err;
+		}
+
+		ret = of_property_read_string(np, "fimc_is_ois_pinname",(const char **) &gpio->pinname);
+		if (ret) {
+			err("ois gpio: fail to read, ois_parse_dt\n");
+			ret = -ENODEV;
+			goto p_err;
+		}
+
+		ret = of_property_read_u32(np, "pinfunc_on", &gpio->pinfunc_on);
+		if (ret) {
+			err("af gpio: fail to read, ois_parse_dt\n");
+			ret = -ENODEV;
+			goto p_err;
+		}
+
+		ret = of_property_read_u32(np, "pinfunc_off", &gpio->pinfunc_off);
+		if (ret) {
+			err("af gpio: fail to read, ois_parse_dt\n");
+			ret = -ENODEV;
+			goto p_err;
+		}
+
+		info("[OIS] sda = %s, scl = %s, pinname = %s, pinfunc_on = %d, pinfunc_off = %d\n",
+				gpio->sda, gpio->scl, gpio->pinname, gpio->pinfunc_on, gpio->pinfunc_off);
 	}
-
-	ret = of_property_read_string(np, "fimc_is_ois_scl",(const char **) &gpio->scl);
-	if (ret) {
-		err("ois gpio: fail to read, ois_parse_dt\n");
-		ret = -ENODEV;
-		goto p_err;
-	}
-
-	ret = of_property_read_string(np, "fimc_is_ois_pinname",(const char **) &gpio->pinname);
-	if (ret) {
-		err("ois gpio: fail to read, ois_parse_dt\n");
-		ret = -ENODEV;
-		goto p_err;
-	}
-
-	info("[OIS] sda = %s, scl = %s, pinname = %s\n", gpio->sda, gpio->scl, gpio->pinname);
 
 p_err:
 	return ret;
@@ -1819,27 +1813,23 @@ static int fimc_is_ois_probe(struct i2c_client *client,
 	}
 
 	gpio = &device->gpio;
-	pin_config_set(gpio->pinname, gpio->sda,
-		PINCFG_PACK(PINCFG_TYPE_FUNC, 0));
-	pin_config_set(gpio->pinname, gpio->scl,
-		PINCFG_PACK(PINCFG_TYPE_FUNC, 0));
-	pin_config_set(gpio->pinname, gpio->sda,
-		PINCFG_PACK(PINCFG_TYPE_PUD, 0));
-	pin_config_set(gpio->pinname, gpio->scl,
-		PINCFG_PACK(PINCFG_TYPE_PUD, 0));
+
+	if(gpio->use_i2c_pinctrl) {
+		pin_config_set(gpio->pinname, gpio->sda,
+			PINCFG_PACK(PINCFG_TYPE_FUNC, gpio->pinfunc_on));
+		pin_config_set(gpio->pinname, gpio->scl,
+			PINCFG_PACK(PINCFG_TYPE_FUNC, gpio->pinfunc_on));
+		pin_config_set(gpio->pinname, gpio->sda,
+			PINCFG_PACK(PINCFG_TYPE_PUD, 0));
+		pin_config_set(gpio->pinname, gpio->scl,
+			PINCFG_PACK(PINCFG_TYPE_PUD, 0));
+	}
 
 	return 0;
 }
 
 static int fimc_is_ois_remove(struct i2c_client *client)
 {
-#ifdef CONFIG_OIS_FW_UPDATE_THREAD_USE
-	if (ois_ts) {
-		kthread_stop(ois_ts);
-		ois_ts = NULL;
-	}
-#endif
-
 	return 0;
 }
 

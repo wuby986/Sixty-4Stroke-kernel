@@ -253,6 +253,7 @@ static struct exynos_pmu_conf exynos7420_pmu_option[] = {
 	{ FSYS0_OPTION,			 {      0x101,      0x101,      0x101,      0x101,      0x101,      0x101,      0x101, 0xC0001102 } },
 	{ FSYS1_OPTION,			 {      0x101,      0x101, 0xE0000102, 0xE0000102, 0xE0000102, 0xE0000102, 0xE0000102, 0xC0001102 } },
 	{ PAD_RETENTION_BUS0_TOP_OPTION, { 0x20000000, 0x20000000, 0x20000000, 0x20000000, 0x20000000, 0x00000000, 0x00000000, 0x00000000 } },
+	{ TOP_PWR_OPTION, 		 {        0x2,        0x2,        0x2,        0x2,        0x2, 0x08080002, 0x08080002,        0x2 } },
 	{ NULL, },
 };
 
@@ -416,10 +417,13 @@ static void init_pmu_cpu_option(void)
 #define USE_STANDBYWFI		(0x1 << 16)
 #define USE_SC_FEEDBACK		(0x1 << 1)
 #define USE_SC_COUNTER		(0x1 << 0)
+#define USE_MEMPWRDOWN		(0x1 << 2)
 	/* use both sc_counter and sc_feedback */
 	/* enable to wait for low SMP-bit at sys power down */
 	for (cpu = 0; cpu < 8; cpu++) {
 		tmp = __raw_readl(CPU_OPTION(cpu));
+		if (cpu < 4)
+			tmp |= USE_MEMPWRDOWN;
 		tmp |= (USE_SC_FEEDBACK | USE_SC_COUNTER);
 		tmp |= USE_SMPEN;
 		tmp |= USE_STANDBYWFI;

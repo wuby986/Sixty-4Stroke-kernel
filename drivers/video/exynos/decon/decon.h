@@ -92,6 +92,8 @@ extern int decon_log_level;
 #endif
 
 #define DECON_UNDERRUN_THRESHOLD	300
+#define DECON_CRC_KEY	(0x3c879c68df96d8f3)
+#define DECON_CRC_BUF_KEY (0x12131415)
 
 #ifdef CONFIG_FB_WINDOW_UPDATE
 #define DECON_WIN_UPDATE_IDX	(7)
@@ -227,6 +229,15 @@ struct decon_resources {
 	struct clk *aclk_disp;
 	struct clk *pclk_disp;
 	struct clk *mif_pll;
+	struct clk *disp_pll;
+	struct clk *m_sclk_decon_eclk;
+	struct clk *mout_bus1_pll_top0;
+	struct clk *dout_sclk_decon_eclk;
+	struct clk *m_decon_eclk;
+	struct clk *um_decon_eclk;
+	struct clk *d_decon_eclk;
+	struct clk *m_decon_vclk;
+	struct clk *d_decon_vclk;
 };
 
 struct decon_rect {
@@ -244,6 +255,7 @@ struct decon_win {
 
 	struct decon_fb_videomode	win_mode;
 	struct decon_dma_buf_data	dma_buf_data[MAX_BUF_PLANE_CNT];
+	struct ion_handle               *handle_crc;
 	int				plane_cnt;
 	struct fb_var_screeninfo	prev_var;
 	struct fb_fix_screeninfo	prev_fix;
@@ -394,6 +406,8 @@ struct decon_win_config {
 			struct vpp_params		vpp_parm;
 			/* no read area of IDMA */
 			struct decon_win_rect		block_area;
+			struct decon_win_rect           transparent_area;
+			struct decon_win_rect           opaque_area;			
 			/* source framebuffer coordinates */
 			struct decon_frame		src;
 		};
@@ -435,11 +449,13 @@ struct decon_reg_data {
 	u32				wb_whole_h;
 	struct decon_win_config		vpp_config[MAX_DECON_WIN];
 	struct decon_win_rect		block_rect[MAX_DECON_WIN];
+	int				blk_mode[MAX_DECON_WIN];
 #ifdef CONFIG_FB_WINDOW_UPDATE
 	struct decon_win_rect		update_win;
 	bool				need_update;
 #endif
 	bool				protection[MAX_DECON_WIN];
+	struct ion_handle 		*handle_crc[MAX_DECON_WIN];
 };
 
 struct decon_win_config_data {
@@ -569,6 +585,8 @@ struct disp_log_vpp {
 	u32 id;
 	u32 start_cnt;
 	u32 done_cnt;
+	u32 cur_int;
+	u32 cur_bw;
 };
 
 /* Related with frame count */
@@ -576,6 +594,13 @@ struct disp_frame {
 	u32 timeline;
 	u32 timeline_max;
 };
+
+typedef enum disp_esd_irq {
+	irq_no_esd = 0,
+	irq_pcd_det,
+	irq_err_fg,
+	irq_disp_det
+} disp_esd_irq_t;
 
 struct esd_protect {
 	u32 pcd_irq;
@@ -586,6 +611,9 @@ struct esd_protect {
 	struct workqueue_struct *esd_wq;
 	struct work_struct esd_work;
 	u32	queuework_pending;
+	int irq_disable;
+	disp_esd_irq_t irq_type;
+	ktime_t when_irq_enable;
 };
 
 struct disp_log_decon_frm_done {
@@ -683,6 +711,7 @@ struct decon_device {
 
 	struct mutex			update_regs_list_lock;
 	struct list_head		update_regs_list;
+	int				update_regs_list_cnt;
 	struct task_struct		*update_regs_thread;
 	struct kthread_worker		update_regs_worker;
 	struct kthread_work		update_regs_work;
@@ -732,6 +761,12 @@ struct decon_device {
 	atomic_t wb_done;
 
 	unsigned int			irq;
+	int				prev_buf_fd[MAX_DECON_WIN];
+	struct decon_frame		prev_src_frm[MAX_DECON_WIN];
+	struct decon_win_rect		prev_block_rect[MAX_DECON_WIN];
+	u32 				num_blk_region_calc;
+	u32				num_blk_region;
+	u32				num_idma_blk_region;
 #ifdef CONFIG_CPU_IDLE
         struct notifier_block           lpc_nb;
 #endif
@@ -761,7 +796,15 @@ struct decon_device {
 	struct mdnie_info *mdnie;
 	struct decon_win_config_data winconfig;
 #endif
-	unsigned int force_fullupdate;
+	unsigned int			force_fullupdate;
+	bool				dma_block_disable;
+	bool				win_update_disable;
+	bool				lpd_disable;
+	bool				sblock_disable;
+	bool				sdma_map_disable;
+
+	int	systrace_pid;
+	void	(*tracing_mark_write)( int pid, char id, char* str1, int value );
 };
 
 static inline struct decon_device *get_decon_drvdata(u32 id)

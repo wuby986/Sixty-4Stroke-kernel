@@ -392,7 +392,7 @@ static struct v4l2_queryctrl controls[] = {
 		.id = V4L2_CID_MPEG_VIDEO_QOS_RATIO,
 		.type = V4L2_CTRL_TYPE_INTEGER,
 		.name = "QoS ratio value",
-		.minimum = 20,
+		.minimum = 0,
 		.maximum = 1000,
 		.step = 10,
 		.default_value = 100,
@@ -419,15 +419,6 @@ static struct v4l2_queryctrl controls[] = {
 		.id = V4L2_CID_MPEG_MFC_GET_EXT_INFO,
 		.type = V4L2_CTRL_TYPE_INTEGER,
 		.name = "Get extra information",
-		.minimum = INT_MIN,
-		.maximum = INT_MAX,
-		.step = 1,
-		.default_value = 0,
-	},
-	{
-		.id = V4L2_CID_MPEG_MFC_SET_BUF_PROCESS_TYPE,
-		.type = V4L2_CTRL_TYPE_INTEGER,
-		.name = "Set buffer process type",
 		.minimum = INT_MIN,
 		.maximum = INT_MAX,
 		.step = 1,
@@ -1751,9 +1742,10 @@ static int vidioc_qbuf(struct file *file, void *priv, struct v4l2_buffer *buf)
 				sizeof(struct timeval));
 		}
 		if (ctx->last_framerate != 0 &&
-				ctx->last_framerate != ctx->framerate) {
-			mfc_debug(2, "fps changed: %d -> %d\n",
-					ctx->framerate, ctx->last_framerate);
+				((ctx->last_framerate != ctx->framerate) || ctx->qos_changed)) {
+			mfc_debug(2, "fps changed: %d -> %d (%s)\n",
+					ctx->framerate, ctx->last_framerate,
+					ctx->use_extra_qos ? "extra" : "normal");
 			ctx->framerate = ctx->last_framerate;
 			s5p_mfc_qos_on(ctx);
 		}
@@ -1854,7 +1846,7 @@ static int vidioc_streamoff(struct file *file, void *priv,
 	} else if (type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		ret = vb2_streamoff(&ctx->vq_dst, type);
 		if (!ret) {
-			if (!(ctx->buf_process_type & MFCBUFPROC_COPY))
+			if (!ctx->use_extra_qos)
 				s5p_mfc_qos_off(ctx);
 		}
 	} else {
@@ -1891,6 +1883,8 @@ static int dec_ext_info(struct s5p_mfc_ctx *ctx)
 		val |= DEC_SET_DYNAMIC_DPB;
 	if (FW_HAS_LAST_DISP_INFO(dev))
 		val |= DEC_SET_LAST_FRAME_INFO;
+	if (FW_SUPPORT_SKYPE(dev))
+		val |= DEC_SET_SKYPE_FLAG;
 
 	return val;
 }
@@ -2000,6 +1994,9 @@ static int get_ctrl_val(struct s5p_mfc_ctx *ctx, struct v4l2_control *ctrl)
 		break;
 	case V4L2_CID_MPEG_MFC_GET_EXT_INFO:
 		ctrl->value = dec_ext_info(ctx);
+		break;
+	case V4L2_CID_MPEG_MFC_GET_DRIVER_INFO:
+		ctrl->value = MFC_DRIVER_INFO;
 		break;
 	default:
 		list_for_each_entry(ctx_ctrl, &ctx->ctrls, list) {
@@ -2177,8 +2174,16 @@ static int vidioc_s_ctrl(struct file *file, void *priv,
 	case V4L2_CID_MPEG_VIDEO_QOS_RATIO:
 		if (ctrl->value > 150)
 			ctrl->value = 1000;
-		mfc_info_ctx("set %d qos_ratio.\n", ctrl->value);
+		if (ctrl->value == 0) {
+			ctrl->value = 100;
+			ctx->use_extra_qos = 1;
+			mfc_info_ctx("QOS_RATIO is 0, use extra qos!\n");
+		} else {
+			ctx->use_extra_qos = 0;
+			mfc_info_ctx("QOS_RATIO is %d, use normal qos!\n", ctrl->value);
+		}
 		ctx->qos_ratio = ctrl->value;
+		ctx->qos_changed = 1;
 		break;
 	case V4L2_CID_MPEG_MFC_SET_DYNAMIC_DPB_MODE:
 		if (FW_HAS_DYNAMIC_DPB(dev))
@@ -2192,9 +2197,6 @@ static int vidioc_s_ctrl(struct file *file, void *priv,
 			dec->sh_handle.fd = -1;
 			return -EINVAL;
 		}
-		break;
-	case V4L2_CID_MPEG_MFC_SET_BUF_PROCESS_TYPE:
-		ctx->buf_process_type = ctrl->value;
 		break;
 	default:
 		list_for_each_entry(ctx_ctrl, &ctx->ctrls, list) {
@@ -2759,9 +2761,11 @@ static int s5p_mfc_stop_streaming(struct vb2_queue *q)
 		ctx->state = MFCINST_ABORT;
 		if (s5p_mfc_wait_for_done_ctx(ctx,
 				S5P_FIMV_R2H_CMD_FRAME_DONE_RET))
- 			s5p_mfc_cleanup_timeout(ctx);
-
-		aborted = 1;
+			s5p_mfc_cleanup_timeout(ctx);
+		if (on_res_change(ctx))
+			mfc_debug(2, "stop on res change(state:%d)\n", ctx->state);
+		else
+			aborted = 1;
 	}
 
 	spin_lock_irqsave(&dev->irqlock, flags);
@@ -2771,6 +2775,7 @@ static int s5p_mfc_stop_streaming(struct vb2_queue *q)
 			cleanup_assigned_fd(ctx);
 			cleanup_ref_queue(ctx);
 			dec->dynamic_used = 0;
+			dec->err_sync_flag = 0;
 		}
 
 		s5p_mfc_cleanup_queue(&ctx->dst_queue, &ctx->vq_dst);
@@ -2819,7 +2824,18 @@ static int s5p_mfc_stop_streaming(struct vb2_queue *q)
 
 	if (IS_MFCV6(dev) && q->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE &&
 			need_to_dpb_flush(ctx)) {
+		int ret = 0;
+
 		prev_state = ctx->state;
+		/* If a H/W operation is in progress, wait for it complete */
+		ret = wait_event_interruptible_timeout(ctx->queue,
+				(dev->hw_lock == 0),
+				msecs_to_jiffies(MFC_INT_TIMEOUT));
+		if (ret == 0) {
+			mfc_err_dev("Waiting for hardware to finish timed out\n");
+			ret = -EIO;
+			return ret;
+		}
 		ctx->state = MFCINST_DPB_FLUSHING;
 		spin_lock_irq(&dev->condlock);
 		set_bit(ctx->num, &dev->ctx_work_bits);
@@ -2831,6 +2847,9 @@ static int s5p_mfc_stop_streaming(struct vb2_queue *q)
 			s5p_mfc_cleanup_timeout(ctx);
 		ctx->state = prev_state;
 	}
+
+	mfc_debug(2, "buffer cleanup & flush is done in stop_streaming, type : %d\n", q->type);
+
 	return 0;
 }
 
@@ -2866,6 +2885,7 @@ static void s5p_mfc_buf_queue(struct vb2_buffer *vb)
 	int remove_flag = 0;
 	int index;
 	int skip_add = 0;
+	unsigned char *stream_vir = NULL;
 
 	mfc_debug_enter();
 	if (!ctx) {
@@ -2890,9 +2910,14 @@ static void s5p_mfc_buf_queue(struct vb2_buffer *vb)
 		mfc_debug(2, "Adding to src: %p (0x%08lx, 0x%08lx)\n", vb,
 			(unsigned long)s5p_mfc_mem_plane_addr(ctx, vb, 0),
 			(unsigned long)buf->planes.stream);
+		if (ctx->state < MFCINST_HEAD_PARSED && !ctx->is_drm) {
+			stream_vir = vb2_plane_vaddr(vb, 0);
+			s5p_mfc_mem_inv_vb(vb, 1);
+		}
 		spin_lock_irqsave(&dev->irqlock, flags);
 		list_add_tail(&buf->list, &ctx->src_queue);
 		ctx->src_queue_cnt++;
+		buf->vir_addr = stream_vir;
 		spin_unlock_irqrestore(&dev->irqlock, flags);
 	} else if (vq->type == V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE) {
 		buf->used = 0;
@@ -3050,6 +3075,7 @@ int s5p_mfc_init_dec_ctx(struct s5p_mfc_ctx *ctx)
 	dec->is_dts_mode = 0;
 	dec->is_dual_dpb = 0;
 	dec->tiled_buf_cnt = 0;
+	dec->err_sync_flag = 0;
 
 	dec->is_dynamic_dpb = 0;
 	dec->dynamic_used = 0;

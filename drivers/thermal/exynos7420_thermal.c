@@ -71,6 +71,7 @@ static enum mif_noti_state_t mif_old_state = MIF_TH_LV1;
 static enum isp_noti_state_t isp_old_state = ISP_NORMAL;
 static bool is_suspending;
 static bool is_cpu_hotplugged_out;
+static int last_temperature;
 
 static BLOCKING_NOTIFIER_HEAD(exynos_tmu_notifier);
 static BLOCKING_NOTIFIER_HEAD(exynos_gpu_notifier);
@@ -839,6 +840,7 @@ static void exynos_tmu_get_efuse(struct platform_device *pdev, int id)
 	struct exynos_tmu_data *data = platform_get_drvdata(pdev);
 	struct exynos_tmu_platform_data *pdata = data->pdata;
 	unsigned int trim_info, temp;
+	int retry_cnt = 0;
 
 	mutex_lock(&data->lock);
 
@@ -847,6 +849,21 @@ static void exynos_tmu_get_efuse(struct platform_device *pdev, int id)
 
 	/* Save trimming info in order to perform calibration */
 	trim_info = readl(data->base[id] + EXYNOS_TMU_REG_TRIMINFO);
+
+	/* retry read TRIMINFO when 0, it could be happend cur_probe_sensor is changed after check */
+	while (trim_info == 0) {
+		mdelay(1);
+		while (get_cur_probe_sensor(data, id) != SENSOR_P0)
+			usleep_range(1, 2);
+
+		trim_info = readl(data->base[id] + EXYNOS_TMU_REG_TRIMINFO);
+
+		retry_cnt++;
+
+		if (retry_cnt == 10 && trim_info == 0) {
+			panic("TMU[%d] TRIMINFO READ FAIL\n", id);
+		}
+	}
 
 	if (trim_info & CALIB_SEL_MASK)
 		pdata->cal_type = TYPE_TWO_POINT_TRIMMING;
@@ -936,8 +953,10 @@ static int exynos_tmu_read(struct exynos_tmu_data *data)
 	}
 #endif
 
-	exynos_check_tmu_noti_state(max);
-	exynos_check_mif_noti_state(max);
+	if (max != INT_MIN || last_temperature < COLD_TEMP_LOW_POWER_THRESHOLD) {
+		exynos_check_tmu_noti_state(max);
+		exynos_check_mif_noti_state(max);
+	}
 
 	if (gpu_temp != -1)
 		exynos_check_gpu_noti_state(gpu_temp);
@@ -951,6 +970,9 @@ static int exynos_tmu_read(struct exynos_tmu_data *data)
 #endif
 	pr_debug("[TMU] TMU0 = %d, TMU1 = %d, TMU2 = %d, TMU3 = %d    MAX = %d, GPU = %d\n",
 			alltemp[0], alltemp[1], alltemp[2], alltemp[3], max, gpu_temp);
+
+	if (max != INT_MIN)
+		last_temperature = max;
 
 	return max;
 }
@@ -1106,14 +1128,29 @@ static struct ipa_sensor_conf ipa_sensor_conf = {
 static int exynos_pm_notifier(struct notifier_block *notifier,
 		unsigned long pm_event, void *v)
 {
+	int i;
+	struct exynos_tmu_data *data;
+	data = platform_get_drvdata(exynos_tmu_pdev);
+
 	switch (pm_event) {
 	case PM_SUSPEND_PREPARE:
+		mutex_lock(&tmudata->lock);
 		is_suspending = true;
+
+		for (i = 0; i < EXYNOS_TMU_COUNT; i++)
+			cal_tmu_interrupt(data->cal_data, i, false);
+
 		exynos_tmu_call_notifier(TMU_COLD, 0);
 		exynos_gpu_call_notifier(TMU_COLD);
+		mutex_unlock(&tmudata->lock);
 		break;
 	case PM_POST_SUSPEND:
+		mutex_lock(&tmudata->lock);
 		is_suspending = false;
+
+		for (i = 0; i < EXYNOS_TMU_COUNT; i++)
+			cal_tmu_interrupt(data->cal_data, i, true);
+		mutex_unlock(&tmudata->lock);
 		break;
 	}
 

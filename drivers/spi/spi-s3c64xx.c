@@ -149,12 +149,17 @@ static LIST_HEAD(drvdata_list);
 
 #define msecs_to_loops(t) (loops_per_jiffy / 1000 * HZ * t)
 
+#define SENSOR_HUB_PORT			(1)
+#define CLK_ENABLE_PCLK_PERIC1		(0x14C80900)
+
 #define RXBUSY    (1<<2)
 #define TXBUSY    (1<<3)
 
 /* For Oberthur ese, but can be used even OT macro is disabled */
 struct pinctrl_state *spi_pin_state[ESE_MAX_GPIO_STATE];
 struct pinctrl *spi_pinctrl;
+
+u32 __iomem *clk_test;
 
 /**
  * struct s3c64xx_spi_info - SPI Controller hardware info
@@ -1017,6 +1022,15 @@ static int s3c64xx_spi_transfer_one_message(struct spi_master *master,
 		goto out;
 	}
 
+	if (sdd->port_id == SENSOR_HUB_PORT) {
+		if (!(readl(clk_test) & (1 << 13))) {
+			dev_err(&spi->dev, "PCLK_SPI1 was disabled: 0x%08x!!!!\n",
+						readl(clk_test));
+			status = -EIO;
+			goto out;
+		}
+	}
+
 	/* Configure feedback delay */
 	writel(cs->fb_delay & 0x3, sdd->regs + S3C64XX_SPI_FB_CLK);
 
@@ -1242,6 +1256,16 @@ static int s3c64xx_spi_setup(struct spi_device *spi)
 		return -ENODEV;
 	}
 
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (sdd->port_id == CONFIG_SENSORS_FP_SPI_NUMBER)
+		return 0;
+#endif
+
+#ifdef CONFIG_ESE_SECURE_ENABLE
+	if (sdd->port_id == CONFIG_ESE_SECURE_SPI_PORT)
+		return 0;
+#endif
+
 	if (!spi_get_ctldata(spi)) {
 		if(cs->line != 0) {
 			err = gpio_request_one(cs->line, GPIOF_OUT_INIT_HIGH,
@@ -1399,6 +1423,15 @@ static void s3c64xx_spi_hwinit(struct s3c64xx_spi_driver_data *sdd, int channel)
 #ifdef ENABLE_ESE_P3_EXYNO_SPI
 	struct s3c64xx_spi_csinfo *cs;
 	void __iomem *gpg4con, *gpg4dat;
+#endif
+
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (channel == CONFIG_SENSORS_FP_SPI_NUMBER)
+		return;
+#endif
+#ifdef CONFIG_ESE_SECURE_ENABLE
+	if (channel == CONFIG_ESE_SECURE_SPI_PORT)
+		return;
 #endif
 
 	sdd->cur_speed = 0;
@@ -1647,6 +1680,13 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 		sdd->port_id = pdev->id;
 	}
 
+	if (sdd->port_id == SENSOR_HUB_PORT) {
+		clk_test = ioremap(CLK_ENABLE_PCLK_PERIC1, SZ_4);
+		if (!clk_test) {
+			dev_err(&pdev->dev, "failed to ioremap PCLK_SPI1 address!!!!\n");
+			return -ENXIO;
+		}
+	}
 
 	sdd->cur_bpw = 8;
 
@@ -1804,9 +1844,18 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 		goto err3;
 	}
 
-	writel(S3C64XX_SPI_INT_RX_OVERRUN_EN | S3C64XX_SPI_INT_RX_UNDERRUN_EN |
-	       S3C64XX_SPI_INT_TX_OVERRUN_EN | S3C64XX_SPI_INT_TX_UNDERRUN_EN,
-	       sdd->regs + S3C64XX_SPI_INT_EN);
+	if (1
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	&& (sdd->port_id != CONFIG_SENSORS_FP_SPI_NUMBER)
+#endif
+#ifdef CONFIG_ESE_SECURE_ENABLE
+	&& (sdd->port_id != CONFIG_ESE_SECURE_SPI_PORT)
+#endif
+	) {
+		writel(S3C64XX_SPI_INT_RX_OVERRUN_EN | S3C64XX_SPI_INT_RX_UNDERRUN_EN |
+			S3C64XX_SPI_INT_TX_OVERRUN_EN | S3C64XX_SPI_INT_TX_UNDERRUN_EN,
+			sdd->regs + S3C64XX_SPI_INT_EN);
+	}
 
 	pm_runtime_mark_last_busy(&pdev->dev);
 	pm_runtime_put_sync(&pdev->dev);
@@ -1853,6 +1902,9 @@ static int s3c64xx_spi_remove(struct platform_device *pdev)
 {
 	struct spi_master *master = spi_master_get(platform_get_drvdata(pdev));
 	struct s3c64xx_spi_driver_data *sdd = spi_master_get_devdata(master);
+
+	if (sdd->port_id == SENSOR_HUB_PORT)
+		iounmap(clk_test);
 
 	pm_runtime_disable(&pdev->dev);
 

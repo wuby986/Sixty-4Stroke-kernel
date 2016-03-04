@@ -32,6 +32,7 @@
 
 #include <linux/platform_data/modem_debug.h>
 #include <linux/platform_data/modem_v1.h>
+#include "modem_pktlog.h"
 
 #include <linux/mipi-lli.h>
 
@@ -471,10 +472,6 @@ struct link_device {
 	/* flag of stopped state for all channels */
 	atomic_t netif_stopped;
 
-	struct workqueue_struct *tx_wq;
-	struct work_struct tx_work;
-	struct delayed_work tx_delayed_work;
-
 	struct delayed_work *tx_dwork[MAX_SIPC_DEVICES];
 	struct delayed_work fmt_tx_dwork;
 	struct delayed_work raw_tx_dwork;
@@ -525,9 +522,6 @@ struct link_device {
 	/* Above are common methods to all memory-type link devices           */
 	/*====================================================================*/
 	/* Below are specific methods to each physical link device            */
-
-	/* ready a link_device instance */
-	void (*ready)(struct link_device *ld);
 
 	/* reset physical link */
 	void (*reset)(struct link_device *ld);
@@ -598,6 +592,7 @@ struct modemctl_ops {
 	int (*modem_force_crash_exit)(struct modem_ctl *);
 	int (*modem_dump_reset)(struct modem_ctl *);
 	int (*modem_dump_start)(struct modem_ctl *);
+	int (*modem_cp_upload)(struct modem_ctl *, char *);
 };
 
 /* for IPC Logger */
@@ -765,6 +760,8 @@ struct modem_ctl {
 
 	bool need_switch_to_usb;
 	bool sim_polarity;
+
+	struct list_head bbinfo;
 
 	bool sim_shutdown_req;
 	void (*modem_complete)(struct modem_ctl *mc);

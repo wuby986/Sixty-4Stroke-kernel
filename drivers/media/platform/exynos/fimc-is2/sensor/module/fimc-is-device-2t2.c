@@ -122,6 +122,9 @@ static int sensor_2t2_power_setpin(struct platform_device *pdev,
 	if (!gpio_is_valid(gpio_comp_rst)) {
 		dev_err(dev, "%s: failed to get main comp reset gpio\n", __func__);
 		return -EINVAL;
+	} else {
+		gpio_request_one(gpio_comp_rst, GPIOF_OUT_INIT_LOW, "CAM_GPIO_OUTPUT_LOW");
+		gpio_free(gpio_comp_rst);
 	}
 
 	gpio_reset = of_get_named_gpio(dnode, "gpio_reset", 0);
@@ -174,7 +177,7 @@ static int sensor_2t2_power_setpin(struct platform_device *pdev,
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "VDDD_NORET_0.9V_COMP", PIN_REGULATOR, 1, 0);
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "VDDD_CORE_0.8V_COMP", PIN_REGULATOR, 1, 0);
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_none, "pin", PIN_FUNCTION, 2, 2000);
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_comp_rst, "comp_rst high", PIN_OUTPUT, 1, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_comp_rst, "comp_rst high", PIN_OUTPUT, 1, 300); //cap issue: 0->300
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_ON, gpio_reset, "sen_rst high", PIN_OUTPUT, 1, 2000);
 
 	/* Normal off */
@@ -211,7 +214,7 @@ static int sensor_2t2_power_setpin(struct platform_device *pdev,
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE, gpio_none, "VDDD_NORET_0.9V_COMP", PIN_REGULATOR, 1, 0);
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE, gpio_none, "VDDD_CORE_0.8V_COMP", PIN_REGULATOR, 1, 0);
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE, gpio_none, "pin", PIN_FUNCTION, 2, 2000);
-	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE, gpio_comp_rst, "comp_rst high", PIN_OUTPUT, 1, 0);
+	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE, gpio_comp_rst, "comp_rst high", PIN_OUTPUT, 1, 300); //cap issue: 0->300
 	SET_PIN(pdata, SENSOR_SCENARIO_NORMAL, GPIO_SCENARIO_STANDBY_DISABLE, gpio_reset, "sen_rst high", PIN_OUTPUT, 1, 2000);
 
 	/* STANDBY ENABLE */

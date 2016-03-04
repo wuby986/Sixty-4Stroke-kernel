@@ -199,6 +199,16 @@ static void cal_print_asv_info(void)
 }
 
 #ifdef CONFIG_SEC_FACTORY
+u32 set_table_ver2, table_ver2_1st, table_ver2_2nd;
+static int __init asv_table_ver2_setup(char *str)
+{
+	set_table_ver2 = (u32)simple_strtoul(str,NULL,0);
+	table_ver2_1st = set_table_ver2 & 0x000000FF;
+	table_ver2_2nd = (set_table_ver2 & 0x0000FF00) >> 8;
+	return 1;
+}
+__setup("asv_table_version2=", asv_table_ver2_setup);
+
 static ssize_t exynos7420_show_asv_info(struct device *dev,
 					struct device_attribute *attr,
 					char *buf)
@@ -207,7 +217,10 @@ static ssize_t exynos7420_show_asv_info(struct device *dev,
 
 	/* Set asv group info to buf */
 	count += sprintf(&buf[count], "%u ", gasv_table_info.dvfs_asv_table_version);
-	count += sprintf(&buf[count], "%02x ", gasv_table_info.bigcpu_asv_group);
+	count += sprintf(&buf[count], "%03x ", gasv_table_info.bigcpu_asv_group);
+	count += sprintf(&buf[count], "%03x ", gasv_table_info.g3d_asv_group);
+	count += sprintf(&buf[count], "%u ", table_ver2_1st);
+	count += sprintf(&buf[count], "%u ", table_ver2_2nd);
 	count += sprintf(&buf[count], "\n");
 
 	return count;
@@ -236,7 +249,7 @@ static void asv_table_init(void)
 		gasv_table_info.dvfs_asv_table_version = MAX_ASV_TABLE;
 	}
 
-	if (gasv_table_info.dvfs_asv_table_version > 11 && gasv_table_info.dvfs_asv_table_version < 15) {
+	if (gasv_table_info.dvfs_asv_table_version == 13 || gasv_table_info.dvfs_asv_table_version == 14) {
 		pr_info("(ASV_TBL_VERSION %d ---> %d\n", gasv_table_info.dvfs_asv_table_version, 15);
 		gasv_table_info.dvfs_asv_table_version = 15;
 	}
@@ -268,12 +281,12 @@ u32 cal_get_table_ver(void)
 
 u32 cal_get_ids(void)
 {
-	return __raw_readl(CHIPID_ASV_INFO + 0x01C0) & 0xff;;
+	return 0;
 }
 
 u32 cal_get_hpm(void)
 {
-	return (__raw_readl(CHIPID_ASV_INFO + 0x01C4) >> 24) & 0xff;
+	return 0;
 }
 
 void cal_init(void)
@@ -683,6 +696,14 @@ u32 cal_get_volt(u32 id, s32 level)
 				(id == SYSC_DVFS_INT) ? volt_table_int_asv_v11[idx] :
 				(id == SYSC_DVFS_CAM) ? volt_table_cam_asv_v11[idx] :
 				NULL);
+	} else if(table_ver == 12) {
+		p_table = ((id == SYSC_DVFS_BIG) ? volt_table_big_asv_v12[idx] :
+				(id == SYSC_DVFS_LIT) ? volt_table_lit_asv_v12[idx] :
+				(id == SYSC_DVFS_G3D) ? volt_table_g3d_asv_v12[idx] :
+				(id == SYSC_DVFS_MIF) ? volt_table_mif_asv_v12[idx] :
+				(id == SYSC_DVFS_INT) ? volt_table_int_asv_v12[idx] :
+				(id == SYSC_DVFS_CAM) ? volt_table_cam_asv_v12[idx] :
+				NULL);
 	} else if(table_ver == 15) {
 		p_table = ((id == SYSC_DVFS_BIG) ? volt_table_big_asv_v15[idx] :
 				(id == SYSC_DVFS_LIT) ? volt_table_lit_asv_v15[idx] :
@@ -868,6 +889,12 @@ u32 cal_get_rcc(u32 id, s32 level)
 				(id == SYSC_DVFS_LIT) ? rcc_table_lit_asv_v11[idx] :
 				(id == SYSC_DVFS_G3D) ? rcc_table_g3d_asv_v11[idx] :
 				(id == SYSC_DVFS_MIF) ? rcc_table_mif_asv_v11[idx] :
+				NULL);
+	} else if (table_ver == 12) {
+		p_table = ((id == SYSC_DVFS_BIG) ? rcc_table_big_asv_v12[idx] :
+				(id == SYSC_DVFS_LIT) ? rcc_table_lit_asv_v12[idx] :
+				(id == SYSC_DVFS_G3D) ? rcc_table_g3d_asv_v12[idx] :
+				(id == SYSC_DVFS_MIF) ? rcc_table_mif_asv_v12[idx] :
 				NULL);
 	} else if (table_ver == 15) {
 		p_table = ((id == SYSC_DVFS_BIG) ? rcc_table_big_asv_v15[idx] :

@@ -333,7 +333,7 @@ out:
 }
 
 /* Allow the worst case number of sources (FX Rate currently) */
-static int mixer_sources_cache[ARRAY_SIZE(clearwater_fx_inputs)];
+static unsigned int mixer_sources_cache[ARRAY_SIZE(clearwater_fx_inputs)];
 
 static int clearwater_get_sources(unsigned int reg,
 				  const int **cur_sources, int *lim)
@@ -625,7 +625,7 @@ static int clearwater_adsp_power_ev(struct snd_soc_dapm_widget *w,
 static DECLARE_TLV_DB_SCALE(ana_tlv, 0, 100, 0);
 static DECLARE_TLV_DB_SCALE(eq_tlv, -1200, 100, 0);
 static DECLARE_TLV_DB_SCALE(digital_tlv, -6400, 50, 0);
-static DECLARE_TLV_DB_SCALE(noise_tlv, 0, 600, 0);
+static DECLARE_TLV_DB_SCALE(noise_tlv, -13200, 600, 0);
 static DECLARE_TLV_DB_SCALE(ng_tlv, -10200, 600, 0);
 
 #define CLEARWATER_NG_SRC(name, base) \
@@ -674,7 +674,7 @@ static DECLARE_TLV_DB_SCALE(ng_tlv, -10200, 600, 0);
 	{ name " ANC Source", "RXANCL", "RXANCL" }, \
 	{ name " ANC Source", "RXANCR", "RXANCR" }
 
-int clearwater_cp_mode_get(struct snd_kcontrol *kcontrol,
+static int clearwater_cp_mode_get(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
@@ -691,7 +691,7 @@ int clearwater_cp_mode_get(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-int clearwater_cp_mode_put(struct snd_kcontrol *kcontrol,
+static int clearwater_cp_mode_put(struct snd_kcontrol *kcontrol,
 	struct snd_ctl_elem_value *ucontrol)
 {
 	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
@@ -718,11 +718,11 @@ int clearwater_cp_mode_put(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-const char *clearwater_cp_mode_text[2] = {
+static const char * const clearwater_cp_mode_text[2] = {
 	"Default", "Inverting",
 };
 
-const struct soc_enum clearwater_cp_mode[] = {
+static const struct soc_enum clearwater_cp_mode[] = {
 	SOC_ENUM_SINGLE(0, 0, ARRAY_SIZE(clearwater_cp_mode_text),
 		clearwater_cp_mode_text),
 };
@@ -964,8 +964,8 @@ ARIZONA_MIXER_CONTROLS("DSP6R", CLEARWATER_DSP6RMIX_INPUT_1_SOURCE),
 ARIZONA_MIXER_CONTROLS("DSP7L", CLEARWATER_DSP7LMIX_INPUT_1_SOURCE),
 ARIZONA_MIXER_CONTROLS("DSP7R", CLEARWATER_DSP7RMIX_INPUT_1_SOURCE),
 
-SOC_SINGLE_TLV("Noise Generator Volume", ARIZONA_COMFORT_NOISE_GENERATOR,
-	       ARIZONA_NOISE_GEN_GAIN_SHIFT, 0x16, 0, noise_tlv),
+SOC_SINGLE_TLV("Noise Generator Volume", CLEARWATER_COMFORT_NOISE_GENERATOR,
+	       CLEARWATER_NOISE_GEN_GAIN_SHIFT, 0x16, 0, noise_tlv),
 
 ARIZONA_MIXER_CONTROLS("HPOUT1L", ARIZONA_OUT1LMIX_INPUT_1_SOURCE),
 ARIZONA_MIXER_CONTROLS("HPOUT1R", ARIZONA_OUT1RMIX_INPUT_1_SOURCE),
@@ -1035,13 +1035,13 @@ SOC_DOUBLE("SPKDAT2 Switch", ARIZONA_PDM_SPK2_CTRL_1, ARIZONA_SPK2L_MUTE_SHIFT,
 	   ARIZONA_SPK2R_MUTE_SHIFT, 1, 1),
 
 SOC_DOUBLE_EXT("HPOUT1 DRE Switch", ARIZONA_DRE_ENABLE,
-	   ARIZONA_DRE1L_ENA_SHIFT, ARIZONA_DRE1R_ENA_SHIFT, 1, 0,
+	   VEGAS_DRE1L_ENA_SHIFT, VEGAS_DRE1R_ENA_SHIFT, 1, 0,
 	   snd_soc_get_volsw, clearwater_put_dre),
 SOC_DOUBLE_EXT("HPOUT2 DRE Switch", ARIZONA_DRE_ENABLE,
-	   ARIZONA_DRE2L_ENA_SHIFT, ARIZONA_DRE2R_ENA_SHIFT, 1, 0,
+	   VEGAS_DRE2L_ENA_SHIFT, VEGAS_DRE2R_ENA_SHIFT, 1, 0,
 	   snd_soc_get_volsw, clearwater_put_dre),
 SOC_DOUBLE_EXT("HPOUT3 DRE Switch", ARIZONA_DRE_ENABLE,
-	   ARIZONA_DRE3L_ENA_SHIFT, ARIZONA_DRE3R_ENA_SHIFT, 1, 0,
+	   VEGAS_DRE3L_ENA_SHIFT, VEGAS_DRE3R_ENA_SHIFT, 1, 0,
 	   snd_soc_get_volsw, clearwater_put_dre),
 
 SOC_DOUBLE("HPOUT1 EDRE Switch", CLEARWATER_EDRE_ENABLE,
@@ -1443,8 +1443,8 @@ SND_SOC_DAPM_SUPPLY("MICBIAS3", ARIZONA_MIC_BIAS_CTRL_3,
 SND_SOC_DAPM_SUPPLY("MICBIAS4", ARIZONA_MIC_BIAS_CTRL_4,
 		    ARIZONA_MICB1_ENA_SHIFT, 0, NULL, 0),
 
-SND_SOC_DAPM_PGA("Noise Generator", ARIZONA_COMFORT_NOISE_GENERATOR,
-		 ARIZONA_NOISE_GEN_ENA_SHIFT, 0, NULL, 0),
+SND_SOC_DAPM_PGA("Noise Generator", CLEARWATER_COMFORT_NOISE_GENERATOR,
+		 CLEARWATER_NOISE_GEN_ENA_SHIFT, 0, NULL, 0),
 
 SND_SOC_DAPM_PGA("Tone Generator 1", ARIZONA_TONE_GENERATOR_1,
 		 ARIZONA_TONE1_ENA_SHIFT, 0, NULL, 0),
@@ -1739,25 +1739,29 @@ SND_SOC_DAPM_AIF_IN("AIF4RX2", NULL, 0,
 		    ARIZONA_AIF4_RX_ENABLES, ARIZONA_AIF4RX2_ENA_SHIFT, 0),
 
 SND_SOC_DAPM_PGA_E("OUT1L", SND_SOC_NOPM,
-		   ARIZONA_OUT1L_ENA_SHIFT, 0, NULL, 0, arizona_hp_ev,
+		   ARIZONA_OUT1L_ENA_SHIFT, 0, NULL, 0, clearwater_hp_ev,
 		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD |
 		   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_PGA_E("OUT1R", SND_SOC_NOPM,
-		   ARIZONA_OUT1R_ENA_SHIFT, 0, NULL, 0, arizona_hp_ev,
+		   ARIZONA_OUT1R_ENA_SHIFT, 0, NULL, 0, clearwater_hp_ev,
 		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD |
 		   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_PGA_E("OUT2L", ARIZONA_OUTPUT_ENABLES_1,
 		   ARIZONA_OUT2L_ENA_SHIFT, 0, NULL, 0, arizona_out_ev,
-		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
+		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD |
+		   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_PGA_E("OUT2R", ARIZONA_OUTPUT_ENABLES_1,
 		   ARIZONA_OUT2R_ENA_SHIFT, 0, NULL, 0, arizona_out_ev,
-		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
+		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD |
+		   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_PGA_E("OUT3L", ARIZONA_OUTPUT_ENABLES_1,
 		   ARIZONA_OUT3L_ENA_SHIFT, 0, NULL, 0, arizona_out_ev,
-		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
+		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD |
+		   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_PGA_E("OUT3R", ARIZONA_OUTPUT_ENABLES_1,
 		   ARIZONA_OUT3R_ENA_SHIFT, 0, NULL, 0, arizona_out_ev,
-		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
+		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD |
+		   SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU),
 SND_SOC_DAPM_PGA_E("OUT5L", ARIZONA_OUTPUT_ENABLES_1,
 		   ARIZONA_OUT5L_ENA_SHIFT, 0, NULL, 0, arizona_out_ev,
 		   SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMU),
@@ -2667,7 +2671,7 @@ static irqreturn_t adsp2_irq(int irq, void *data)
 	mutex_lock(&clearwater->compr_info.lock);
 
 	if (!clearwater->compr_info.trig &&
-	    clearwater->core.adsp[5].fw_id == 0x6000d &&
+	    clearwater->core.adsp[5].fw_features.ez2control_trigger &&
 	    clearwater->core.adsp[5].running) {
 		if (clearwater->core.arizona->pdata.ez2ctrl_trigger)
 			clearwater->core.arizona->pdata.ez2ctrl_trigger();
@@ -2797,6 +2801,7 @@ static int clearwater_trigger(struct snd_compr_stream *stream, int cmd)
 {
 	struct snd_soc_pcm_runtime *rtd = stream->private_data;
 	struct clearwater_priv *clearwater = snd_soc_codec_get_drvdata(rtd->codec);
+	struct arizona *arizona = clearwater->core.arizona;
 	int ret = 0;
 	bool pending = false;
 
@@ -2822,8 +2827,12 @@ static int clearwater_trigger(struct snd_compr_stream *stream, int cmd)
 
 	mutex_unlock(&clearwater->compr_info.lock);
 
+	/*
+	* Stream has already trigerred, force irq handler to run
+	* by generating interrupt.
+	*/
 	if (pending)
-		adsp2_irq(0, clearwater);
+		regmap_write(arizona->regmap, CLEARWATER_ADSP2_IRQ0, 0x01);
 
 	return ret;
 }
@@ -2894,7 +2903,10 @@ static int clearwater_codec_probe(struct snd_soc_codec *codec)
 {
 	struct clearwater_priv *priv = snd_soc_codec_get_drvdata(codec);
 	struct arizona *arizona = priv->core.arizona;
-	int ret;
+	int i, ret;
+
+	for (i = 0; i < CLEARWATER_NUM_ADSP; i++)
+		wm_adsp_init_debugfs(&priv->core.adsp[i], codec);
 
 	codec->control_data = priv->core.arizona->regmap;
 	priv->core.arizona->dapm = &codec->dapm;
@@ -2956,6 +2968,10 @@ static int clearwater_codec_remove(struct snd_soc_codec *codec)
 {
 	struct clearwater_priv *priv = snd_soc_codec_get_drvdata(codec);
 	struct arizona *arizona = priv->core.arizona;
+	int i;
+
+	for (i = 0; i < CLEARWATER_NUM_ADSP; i++)
+		wm_adsp_cleanup_debugfs(&priv->core.adsp[i]);
 
 	irq_set_irq_wake(arizona->irq, 0);
 	arizona_free_irq(arizona, ARIZONA_IRQ_DSP_IRQ1, priv);

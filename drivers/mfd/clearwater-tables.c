@@ -465,6 +465,7 @@ static const struct reg_default clearwater_reg_default[] = {
 	{ 0x00000095, 0x0000 }, /* R149 (0x95) - Haptics phase 2 duration */
 	{ 0x00000096, 0x0000 }, /* R150 (0x96) - Haptics phase 3 intensity */
 	{ 0x00000097, 0x0000 }, /* R151 (0x97) - Haptics phase 3 duration */
+	{ 0x000000A0, 0x0000 }, /* R160 (0xA0) - Clearwater Comfort Noise Generator */
 	{ 0x00000100, 0x0002 }, /* R256 (0x100) - Clock 32k 1 */
 	{ 0x00000101, 0x0404 }, /* R257 (0x101) - System Clock 1 */
 	{ 0x00000102, 0x0011 }, /* R258 (0x102) - Sample rate 1 */
@@ -544,16 +545,9 @@ static const struct reg_default clearwater_reg_default[] = {
 	{ 0x00000219, 0x00e6 }, /* R537 (0x219) - Mic Bias Ctrl 2 */
 	{ 0x0000021a, 0x00e6 }, /* R538 (0x21A) - Mic Bias Ctrl 3 */
 	{ 0x0000021B, 0x00e6 }, /* R539  - Mic Bias Ctrl 4 */
-	{ 0x00000225, 0x1406 },
-	{ 0x00000226, 0x1406 },
-	{ 0x00000227, 0x1406 },
-	{ 0x00000228, 0x1406 },
-	{ 0x00000229, 0x1406 },
-	{ 0x0000022a, 0x1406 },
 	{ 0x0000027e, 0x0000 }, /* R638 (0x27E) - Clearwater EDRE HP stereo control */
 	{ 0x00000293, 0x0000 }, /* R659 (0x293) - Accessory Detect Mode 1 */
 	{ 0x0000029b, 0x0000 }, /* R667 (0x29B) - Headphone Detect 1 */
-	{ 0x0000029f, 0x0000 },
 	{ 0x000002a3, 0x1102 }, /* R675 (0x2A3) - Mic Detect 1 */
 	{ 0x000002a4, 0x009f }, /* R676 (0x2A4) - Mic Detect 2 */
 	{ 0x000002a6, 0x3737 },
@@ -564,6 +558,7 @@ static const struct reg_default clearwater_reg_default[] = {
 	{ 0x000002c6, 0x0010 },
 	{ 0x000002c8, 0x0000 }, /* R712 (0x2C8) - GP switch 1 */
 	{ 0x000002d3, 0x0000 }, /* R723 (0x2D3) - Jack detect analogue */
+	{ 0x00000300, 0x0000 }, /* R768  - Input Enables */
 	{ 0x00000308, 0x0000 }, /* R776 (0x308) - Input Rate */
 	{ 0x00000309, 0x0022 }, /* R777 (0x309) - Input Volume Ramp */
 	{ 0x0000030c, 0x0002 }, /* R780 (0x30C) - HPF Control */
@@ -1512,6 +1507,7 @@ static const struct reg_default clearwater_reg_default[] = {
 	{ 0x00000F02, 0x0000 }, /* R3842  - Arizona DSP Status */
 	{ 0x00000F08, 0x001c }, /* R3848  - ANC Coefficient */
 	{ 0x00000F09, 0x0000 }, /* R3849  - ANC Coefficient */
+	{ 0x00000F0A, 0x0000 }, /* R3850  - ANC Coefficient */
 	{ 0x00000F0B, 0x0000 }, /* R3851  - ANC Coefficient */
 	{ 0x00000F0C, 0x0000 }, /* R3852  - ANC Coefficient */
 	{ 0x00000F0D, 0x0000 }, /* R3853  - ANC Coefficient */
@@ -1919,7 +1915,6 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_ALWAYS_ON_TRIGGERS_SEQUENCE_SELECT_4:
 	case ARIZONA_ALWAYS_ON_TRIGGERS_SEQUENCE_SELECT_5:
 	case ARIZONA_ALWAYS_ON_TRIGGERS_SEQUENCE_SELECT_6:
-	case ARIZONA_COMFORT_NOISE_GENERATOR:
 	case ARIZONA_HAPTICS_CONTROL_1:
 	case ARIZONA_HAPTICS_CONTROL_2:
 	case ARIZONA_HAPTICS_PHASE_1_INTENSITY:
@@ -1929,6 +1924,7 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_HAPTICS_PHASE_3_INTENSITY:
 	case ARIZONA_HAPTICS_PHASE_3_DURATION:
 	case ARIZONA_HAPTICS_STATUS:
+	case CLEARWATER_COMFORT_NOISE_GENERATOR:
 	case ARIZONA_CLOCK_32K_1:
 	case ARIZONA_SYSTEM_CLOCK_1:
 	case ARIZONA_SAMPLE_RATE_1:
@@ -2025,6 +2021,8 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_ACCESSORY_DETECT_MODE_1:
 	case ARIZONA_HEADPHONE_DETECT_1:
 	case ARIZONA_HEADPHONE_DETECT_2:
+	case ARIZONA_HEADPHONE_DETECT_3:
+	case ARIZONA_HP_DACVAL:
 	case CLEARWATER_MICD_CLAMP_CONTROL:
 	case ARIZONA_MIC_DETECT_1:
 	case ARIZONA_MIC_DETECT_2:
@@ -2036,7 +2034,6 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_MIC_DETECT_LEVEL_4:
 	case ARIZONA_MIC_NOISE_MIX_CONTROL_1:
 	case CLEARWATER_GP_SWITCH_1:
-	case ARIZONA_ISOLATION_CONTROL:
 	case ARIZONA_JACK_DETECT_ANALOGUE:
 	case ARIZONA_INPUT_ENABLES:
 	case ARIZONA_INPUT_ENABLES_STATUS:
@@ -2079,12 +2076,6 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_IN6R_CONTROL:
 	case ARIZONA_ADC_DIGITAL_VOLUME_6R:
 	case ARIZONA_DMIC6R_CONTROL:
-	case ARIZONA_ADC_VCO_CAL_4:
-	case ARIZONA_ADC_VCO_CAL_5:
-	case ARIZONA_ADC_VCO_CAL_6:
-	case ARIZONA_ADC_VCO_CAL_7:
-	case ARIZONA_ADC_VCO_CAL_8:
-	case ARIZONA_ADC_VCO_CAL_9:
 	case ARIZONA_OUTPUT_ENABLES_1:
 	case ARIZONA_OUTPUT_STATUS_1:
 	case ARIZONA_OUTPUT_STANDBY_1:
@@ -2270,22 +2261,6 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_PWM2MIX_INPUT_3_VOLUME:
 	case ARIZONA_PWM2MIX_INPUT_4_SOURCE:
 	case ARIZONA_PWM2MIX_INPUT_4_VOLUME:
-	case ARIZONA_MICMIX_INPUT_1_SOURCE:
-	case ARIZONA_MICMIX_INPUT_1_VOLUME:
-	case ARIZONA_MICMIX_INPUT_2_SOURCE:
-	case ARIZONA_MICMIX_INPUT_2_VOLUME:
-	case ARIZONA_MICMIX_INPUT_3_SOURCE:
-	case ARIZONA_MICMIX_INPUT_3_VOLUME:
-	case ARIZONA_MICMIX_INPUT_4_SOURCE:
-	case ARIZONA_MICMIX_INPUT_4_VOLUME:
-	case ARIZONA_NOISEMIX_INPUT_1_SOURCE:
-	case ARIZONA_NOISEMIX_INPUT_1_VOLUME:
-	case ARIZONA_NOISEMIX_INPUT_2_SOURCE:
-	case ARIZONA_NOISEMIX_INPUT_2_VOLUME:
-	case ARIZONA_NOISEMIX_INPUT_3_SOURCE:
-	case ARIZONA_NOISEMIX_INPUT_3_VOLUME:
-	case ARIZONA_NOISEMIX_INPUT_4_SOURCE:
-	case ARIZONA_NOISEMIX_INPUT_4_VOLUME:
 	case ARIZONA_OUT1LMIX_INPUT_1_SOURCE:
 	case ARIZONA_OUT1LMIX_INPUT_1_VOLUME:
 	case ARIZONA_OUT1LMIX_INPUT_2_SOURCE:
@@ -2822,12 +2797,8 @@ static bool clearwater_16bit_readable_register(struct device *dev, unsigned int 
 	case ARIZONA_ISRC2INT4MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC3DEC1MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC3DEC2MIX_INPUT_1_SOURCE:
-	case ARIZONA_ISRC3DEC3MIX_INPUT_1_SOURCE:
-	case ARIZONA_ISRC3DEC4MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC3INT1MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC3INT2MIX_INPUT_1_SOURCE:
-	case ARIZONA_ISRC3INT3MIX_INPUT_1_SOURCE:
-	case ARIZONA_ISRC3INT4MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC4DEC1MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC4DEC2MIX_INPUT_1_SOURCE:
 	case ARIZONA_ISRC4INT1MIX_INPUT_1_SOURCE:
@@ -3233,11 +3204,20 @@ static bool clearwater_16bit_volatile_register(struct device *dev, unsigned int 
 	case ARIZONA_SAMPLE_RATE_2_STATUS:
 	case ARIZONA_SAMPLE_RATE_3_STATUS:
 	case ARIZONA_ASYNC_SAMPLE_RATE_1_STATUS:
+	case ARIZONA_ASYNC_SAMPLE_RATE_2_STATUS:
+	case ARIZONA_HP_CTRL_1L:
+	case ARIZONA_HP_CTRL_1R:
+	case ARIZONA_HP_CTRL_2L:
+	case ARIZONA_HP_CTRL_2R:
+	case ARIZONA_HP_CTRL_3L:
+	case ARIZONA_HP_CTRL_3R:
 	case ARIZONA_DCS_HP1L_CONTROL:
 	case ARIZONA_DCS_HP1R_CONTROL:
 	case ARIZONA_MIC_DETECT_3:
 	case ARIZONA_MIC_DETECT_4:
 	case ARIZONA_HEADPHONE_DETECT_2:
+	case ARIZONA_HEADPHONE_DETECT_3:
+	case ARIZONA_HP_DACVAL:
 	case ARIZONA_INPUT_ENABLES_STATUS:
 	case ARIZONA_OUTPUT_STATUS_1:
 	case ARIZONA_RAW_OUTPUT_STATUS_1:
@@ -3310,13 +3290,14 @@ static bool clearwater_32bit_readable_register(struct device *dev, unsigned int 
 {
 	switch (reg) {
 	case ARIZONA_WSEQ_SEQUENCE_1 ... ARIZONA_WSEQ_SEQUENCE_508:
-	case CLEARWATER_DSP1_CONFIG ... CLEARWATER_DSP1_SCRATCH_3:
-	case CLEARWATER_DSP2_CONFIG ... CLEARWATER_DSP2_SCRATCH_3:
-	case CLEARWATER_DSP3_CONFIG ... CLEARWATER_DSP3_SCRATCH_3:
-	case CLEARWATER_DSP4_CONFIG ... CLEARWATER_DSP4_SCRATCH_3:
-	case CLEARWATER_DSP5_CONFIG ... CLEARWATER_DSP5_SCRATCH_3:
-	case CLEARWATER_DSP6_CONFIG ... CLEARWATER_DSP6_SCRATCH_3:
-	case CLEARWATER_DSP7_CONFIG ... CLEARWATER_DSP7_SCRATCH_3:
+	case CLEARWATER_OTP_HPDET_CALIB_1 ... CLEARWATER_OTP_HPDET_CALIB_2:
+	case CLEARWATER_DSP1_CONFIG ... CLEARWATER_DSP1_SCRATCH_2_3:
+	case CLEARWATER_DSP2_CONFIG ... CLEARWATER_DSP2_SCRATCH_2_3:
+	case CLEARWATER_DSP3_CONFIG ... CLEARWATER_DSP3_SCRATCH_2_3:
+	case CLEARWATER_DSP4_CONFIG ... CLEARWATER_DSP4_SCRATCH_2_3:
+	case CLEARWATER_DSP5_CONFIG ... CLEARWATER_DSP5_SCRATCH_2_3:
+	case CLEARWATER_DSP6_CONFIG ... CLEARWATER_DSP6_SCRATCH_2_3:
+	case CLEARWATER_DSP7_CONFIG ... CLEARWATER_DSP7_SCRATCH_2_3:
 		return true;
 	default:
 		return clearwater_is_adsp_memory(dev, reg);
@@ -3327,13 +3308,14 @@ static bool clearwater_32bit_volatile_register(struct device *dev, unsigned int 
 {
 	switch (reg) {
 	case ARIZONA_WSEQ_SEQUENCE_1 ... ARIZONA_WSEQ_SEQUENCE_508:
-	case CLEARWATER_DSP1_CONFIG ... CLEARWATER_DSP1_SCRATCH_3:
-	case CLEARWATER_DSP2_CONFIG ... CLEARWATER_DSP2_SCRATCH_3:
-	case CLEARWATER_DSP3_CONFIG ... CLEARWATER_DSP3_SCRATCH_3:
-	case CLEARWATER_DSP4_CONFIG ... CLEARWATER_DSP4_SCRATCH_3:
-	case CLEARWATER_DSP5_CONFIG ... CLEARWATER_DSP5_SCRATCH_3:
-	case CLEARWATER_DSP6_CONFIG ... CLEARWATER_DSP6_SCRATCH_3:
-	case CLEARWATER_DSP7_CONFIG ... CLEARWATER_DSP7_SCRATCH_3:
+	case CLEARWATER_OTP_HPDET_CALIB_1 ... CLEARWATER_OTP_HPDET_CALIB_2:
+	case CLEARWATER_DSP1_CONFIG ... CLEARWATER_DSP1_SCRATCH_2_3:
+	case CLEARWATER_DSP2_CONFIG ... CLEARWATER_DSP2_SCRATCH_2_3:
+	case CLEARWATER_DSP3_CONFIG ... CLEARWATER_DSP3_SCRATCH_2_3:
+	case CLEARWATER_DSP4_CONFIG ... CLEARWATER_DSP4_SCRATCH_2_3:
+	case CLEARWATER_DSP5_CONFIG ... CLEARWATER_DSP5_SCRATCH_2_3:
+	case CLEARWATER_DSP6_CONFIG ... CLEARWATER_DSP6_SCRATCH_2_3:
+	case CLEARWATER_DSP7_CONFIG ... CLEARWATER_DSP7_SCRATCH_2_3:
 		return true;
 	default:
 		return clearwater_is_adsp_memory(dev, reg);
@@ -3378,7 +3360,7 @@ const struct regmap_config clearwater_32bit_spi_regmap = {
 	.pad_bits = 16,
 	.val_bits = 32,
 
-	.max_register = CLEARWATER_DSP7_SCRATCH_3,
+	.max_register = CLEARWATER_DSP7_SCRATCH_2_3,
 	.readable_reg = clearwater_32bit_readable_register,
 	.volatile_reg = clearwater_32bit_volatile_register,
 
@@ -3392,7 +3374,7 @@ const struct regmap_config clearwater_32bit_i2c_regmap = {
 	.reg_stride = 2,
 	.val_bits = 32,
 
-	.max_register = CLEARWATER_DSP7_SCRATCH_3,
+	.max_register = CLEARWATER_DSP7_SCRATCH_2_3,
 	.readable_reg = clearwater_32bit_readable_register,
 	.volatile_reg = clearwater_32bit_volatile_register,
 

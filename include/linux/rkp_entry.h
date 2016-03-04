@@ -39,12 +39,39 @@
 
 /*** TODO: We need to export this so it is hard coded 
      at one place*/
-#define RKP_ROBUF_START  UL(0x52400000)
-#define RKP_RBUF_VA      (phys_to_virt(RKP_ROBUF_START))
-#define RO_PAGES_ORDER 11  // (8MB/4KB)
 
-#define RKP_PGT_BITMAP_LEN 0x18000
+#define RKP_PGT_BITMAP_LEN 0x20000
+
+#ifdef CONFIG_SOC_EXYNOS7420
+
+#define   TIMA_VMM_START        0x4dd00000
+#define   TIMA_VMM_SIZE         1<<20
+
+#define   TIMA_DEBUG_LOG_START  0x52300000
+#define   TIMA_DEBUG_LOG_SIZE   1<<18
+
+#define   TIMA_SEC_LOG          0x52400000
+#define   TIMA_SEC_LOG_SIZE     0x7000 
+
+#define   TIMA_PHYS_MAP         0x4da00000
+#define   TIMA_PHYS_MAP_SIZE    0x300000
+#define   TIMA_PHYS_MAP_OFFSET  0x200000
+
+#define   TIMA_DASHBOARD_START  0x52407000
+#define   TIMA_DASHBOARD_SIZE    0x1000
+
+#define   TIMA_ROBUF_START      0x52408000
+#define   TIMA_ROBUF_SIZE       0x7f8000 /* 8MB - RKP_SEC_LOG_SIZE - RKP_DASHBOARD_SIZE)*/
+
+#define RKP_RBUF_VA      (phys_to_virt(TIMA_ROBUF_START))
+#define RO_PAGES  0x7f8 // (TIMA_ROBUF_SIZE/PAGE_SIZE)
+#define CRED_JAR_RO "cred_jar_ro"
+#define TSEC_JAR	"tsec_jar"
+#define VFSMNT_JAR	"vfsmnt_cache"
+#endif /* CONFIG_SOC_EXYNOS7420 */
+
 extern u8 rkp_pgt_bitmap[];
+extern u8 rkp_map_bitmap[];
 
 typedef struct rkp_init rkp_init_t;
 extern u8 rkp_started;
@@ -53,6 +80,7 @@ extern void rkp_ro_free(void *free_addr);
 #ifdef CONFIG_KNOX_KAP
 extern int boot_mode_security;
 #endif  //CONFIG_KNOX_KAP
+extern int rkp_support_large_memory;
 
 struct rkp_init {
 	u32 magic;
@@ -62,6 +90,7 @@ struct rkp_init {
 	u64 id_map_pgd;
 	u64 zero_pg_addr;
 	u64 rkp_pgt_bitmap;
+	u64 rkp_map_bitmap;
 	u32 rkp_pgt_bitmap_size;
 	u64 _text;
 	u64 _etext;
@@ -70,6 +99,7 @@ struct rkp_init {
 	u64 physmap_addr;
 	u64 _srodata;
 	u64 _erodata;
+	u32 large_memory;
 } __attribute__((packed));
 
 #ifdef CONFIG_RKP_KDP
@@ -80,6 +110,8 @@ typedef struct kdp_init
 	u32 mm_task;
 	u32 uid_cred;
 	u32 euid_cred;
+	u32 gid_cred;
+	u32 egid_cred;
 	u32 bp_pgd_cred;
 	u32 bp_task_cred;
 	u32 type_cred;
@@ -90,6 +122,8 @@ typedef struct kdp_init
 	u32 pgd_mm;
 	u32 usage_cred;
 	u32 task_threadinfo;
+	u32 sp_size;
+	u32 bp_cred_secptr;
 } kdp_init_t;
 #endif  /* CONFIG_RKP_KDP */
 
@@ -104,6 +138,27 @@ static inline u8 rkp_is_pg_protected(u64 va)
 	u64 rindex;
 	u8 val;
 	
+	p += (tmp);
+	rindex = index % 64;
+	val = (((*p) & (1ULL<<rindex))?1:0);
+	return val;
+}
+
+#define	PHYS_OFFSET_MAX		(0x140000ULL << PAGE_SHIFT)
+static inline u8 rkp_is_pg_dbl_mapped(u64 pa)
+{
+	long long phys_addr = pa&(0xFFFFFFFFFF);
+	u64 paddr = (u64)phys_addr - PHYS_OFFSET;
+	u64 index = (paddr>>PAGE_SHIFT);
+	u64 *p = (u64 *)rkp_map_bitmap;
+	u64 tmp = (index>>6);
+	u64 rindex;
+	u8 val;
+	
+	if(phys_addr < PHYS_OFFSET || 
+		(paddr > PHYS_OFFSET_MAX)) {
+		return 0;	
+	}
 	p += (tmp);
 	rindex = index % 64;
 	val = (((*p) & (1ULL<<rindex))?1:0);

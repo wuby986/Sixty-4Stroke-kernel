@@ -34,6 +34,10 @@
 #include <plat/cpu.h>
 #include "pinctrl-exynos.h"
 
+#ifdef CONFIG_SEC_FACTORY
+#undef CONFIG_ESE_SECURE_ENABLE
+#endif
+
 /* bank type for non-alive type (DRV bit field: 2) */
 static struct samsung_pin_bank_type bank_type_0  = {
 	.fld_width = { 4, 1, 2, 2, 2, 2, },
@@ -1564,7 +1568,7 @@ struct samsung_pin_ctrl exynos7420_pin_ctrl[] = {
 		.svc		= EXYNOS_SVC_OFFSET,
 		.gpio_type	= EXYNOS_GPIO_TYPE_DRV_SEPARATE,
 		.eint_gpio_init = exynos_eint_gpio_init,
-#ifndef CONFIG_MST_SECURE_GPIO
+#if !defined(CONFIG_MST_SECURE_GPIO) || defined(CONFIG_MST_NOBLE_TARGET) || defined(CONFIG_MST_ZEN_TARGET)
 		.suspend	= exynos5430_pinctrl_suspend,
 		.resume		= exynos5430_pinctrl_resume,
 #endif
@@ -1579,9 +1583,11 @@ struct samsung_pin_ctrl exynos7420_pin_ctrl[] = {
 		.weint_fltcon	= EXYNOS5430_WKUP_EFLTCON_OFFSET,
 		.svc		= EXYNOS_SVC_OFFSET,
 		.gpio_type	= EXYNOS_GPIO_TYPE_DRV_SEPARATE,
+#ifndef CONFIG_ESE_SECURE_ENABLE
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.suspend	= exynos5430_pinctrl_suspend,
 		.resume		= exynos5430_pinctrl_resume,
+#endif
 		.label		= "exynos7420-gpio-ctrl6",
 	}, {
 		/* pin-controller instance 7 ESE data */
@@ -1593,9 +1599,11 @@ struct samsung_pin_ctrl exynos7420_pin_ctrl[] = {
 		.weint_fltcon	= EXYNOS5430_WKUP_EFLTCON_OFFSET,
 		.svc		= EXYNOS_SVC_OFFSET,
 		.gpio_type	= EXYNOS_GPIO_TYPE_DRV_SEPARATE,
+#ifndef ENABLE_SENSORS_FPRINT_SECURE
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.suspend	= exynos5430_pinctrl_suspend,
 		.resume		= exynos5430_pinctrl_resume,
+#endif
 		.label		= "exynos7420-gpio-ctrl7",
 	}, {
 		/* pin-controller instance 8 FSYS0 data */

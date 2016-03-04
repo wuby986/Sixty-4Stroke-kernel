@@ -100,6 +100,7 @@ extern char fw_core_version;
 #else
 bool is_dumped_fw_loading_needed = false;
 #endif
+extern bool supend_resume_disable;
 
 static int fimc_is_ischain_3aa_stop(void *qdevice,
 	struct fimc_is_queue *queue);
@@ -659,7 +660,7 @@ void fimc_is_ischain_version(enum fimc_is_bin_type type, const char *load_bin, u
 			FIMC_IS_VERSION_SIZE);
 		version_str[FIMC_IS_VERSION_SIZE] = '\0';
 
-		info("FW version : %s\n", version_str);
+		info("Phone FW version : %s\n", version_str);
 	} else {
 		memcpy(version_str, &load_bin[size - FIMC_IS_SETFILE_VER_OFFSET],
 			FIMC_IS_SETFILE_VER_SIZE);
@@ -695,7 +696,9 @@ static int fimc_is_ischain_loadfirm(struct fimc_is_device_ischain *device)
 
 #ifdef CONFIG_USE_VENDER_FEATURE
 	struct fimc_is_from_info *sysfs_finfo;
+	struct fimc_is_from_info *sysfs_pinfo;
 	fimc_is_sec_get_sysfs_finfo(&sysfs_finfo);
+	fimc_is_sec_get_sysfs_pinfo(&sysfs_pinfo);
 #endif
 
 	mdbgd_ischain("%s\n", device, __func__);
@@ -740,6 +743,10 @@ static int fimc_is_ischain_loadfirm(struct fimc_is_device_ischain *device)
 		goto out;
 	}
 
+#ifdef CONFIG_USE_VENDER_FEATURE
+	strncpy(sysfs_pinfo->header_ver, buf + nread - 11, FIMC_IS_HEADER_VER_SIZE);
+	fimc_is_sec_set_loaded_fw(sysfs_pinfo->header_ver);
+#endif
 	memcpy((void *)device->imemory.kvaddr, (void *)buf, fsize);
 	fimc_is_ischain_cache_flush(device, 0, fsize + 1);
 	fimc_is_ischain_version(FIMC_IS_BIN_FW, buf, fsize);
@@ -965,8 +972,10 @@ struct fimc_is_module_enum *active_sensor, int position)
 	u32 start_addr = 0;
 	int cal_size = 0;
 	struct fimc_is_from_info *finfo;
+	struct fimc_is_from_info *pinfo;
 	struct exynos_platform_fimc_is *core_pdata = NULL;
 	struct fimc_is_core *core = (struct fimc_is_core *)platform_get_drvdata(device->pdev);
+	char *loaded_fw_ver;
 
 	core_pdata = dev_get_platdata(fimc_is_dev);
 	if (!core_pdata) {
@@ -996,12 +1005,18 @@ struct fimc_is_module_enum *active_sensor, int position)
 		fimc_is_sec_get_cal_buf(&cal_buf);
 	}
 
+	fimc_is_sec_get_sysfs_pinfo(&pinfo);
+	fimc_is_sec_get_loaded_fw(&loaded_fw_ver);
+
 	cal_ptr = (char *)(device->imemory.kvaddr + start_addr);
 
 	info("CAL DATA : MAP ver : %c%c%c%c\n", cal_buf[0x40], cal_buf[0x41],
 		cal_buf[0x42], cal_buf[0x43]);
 
 	info("Camera : Front Sensor Version : 0x%x\n", cal_buf[0x5C]);
+
+	info("eeprom_fw_version = %s, phone_fw_version = %s, loaded_fw_version = %s\n",
+		finfo->header_ver, pinfo->header_ver, loaded_fw_ver);
 
 	/* CRC check */
 	if (position == SENSOR_POSITION_FRONT) {
@@ -1052,7 +1067,11 @@ static int fimc_is_ischain_loadcalb(struct fimc_is_device_ischain *device,
 	int ret = 0;
 #ifdef CONFIG_USE_VENDER_FEATURE
 	char *cal_ptr;
+	u32 start_addr = 0;
+	int cal_size = 0;
 	struct fimc_is_from_info *sysfs_finfo;
+	struct fimc_is_from_info *sysfs_pinfo;
+	char *loaded_fw_ver;
 	char *cal_buf;
 
 	struct fimc_is_core *core = (struct fimc_is_core *)platform_get_drvdata(device->pdev);
@@ -1070,43 +1089,80 @@ static int fimc_is_ischain_loadcalb(struct fimc_is_device_ischain *device,
 		return 0;
 	}
 
-	cal_ptr = (char *)(device->imemory.kvaddr + FIMC_IS_CAL_START_ADDR);
+	if (position == SENSOR_POSITION_FRONT) {
+		start_addr = FIMC_IS_CAL_START_ADDR_FRONT;
+		cal_size = FIMC_IS_MAX_CAL_SIZE_FRONT;
+		fimc_is_sec_get_sysfs_finfo_front(&sysfs_finfo);
+		fimc_is_sec_get_front_cal_buf(&cal_buf);
+	} else {
+		start_addr = FIMC_IS_CAL_START_ADDR;
+		cal_size = FIMC_IS_MAX_CAL_SIZE;
+		fimc_is_sec_get_sysfs_finfo(&sysfs_finfo);
+		fimc_is_sec_get_cal_buf(&cal_buf);
+	}
 
-	fimc_is_sec_get_sysfs_finfo(&sysfs_finfo);
-	fimc_is_sec_get_cal_buf(&cal_buf);
+	fimc_is_sec_get_sysfs_pinfo(&sysfs_pinfo);
+	fimc_is_sec_get_loaded_fw(&loaded_fw_ver);
+
+	cal_ptr = (char *)(device->imemory.kvaddr + start_addr);
 
 	info("CAL DATA : MAP ver : %c%c%c%c\n", cal_buf[0x60], cal_buf[0x61],
 		cal_buf[0x62], cal_buf[0x63]);
 
-	if ((sysfs_finfo->header_ver[0] == 'A') && (sysfs_finfo->header_ver[1] == '2') && (sysfs_finfo->header_ver[2] == '0'))
-		info("Camera : Rear Sensor Version : 0x%x\n", cal_buf[0xC0]);
+	info("from_fw_version = %s, phone_fw_version = %s, loaded_fw_version = %s\n",
+		sysfs_finfo->header_ver, sysfs_pinfo->header_ver, loaded_fw_ver);
 
 	/* CRC check */
-	if (crc32_check == true) {
+	if (position == SENSOR_POSITION_FRONT) {
+		if (crc32_check_front  == true) {
 #ifdef CONFIG_COMPANION_USE
-		if (fimc_is_sec_check_from_ver(core, position)) {
-			memcpy((void *)(cal_ptr) ,(void *)cal_buf, FIMC_IS_MAX_CAL_SIZE);
-			info("Camera : the dumped Cal. data was applied successfully.\n");
-		} else {
-			info("Camera : Did not load dumped Cal. Sensor version is lower than V004.\n");
-		}
+			if (fimc_is_sec_check_from_ver(core, position)) {
+				memcpy((void *)(cal_ptr) ,(void *)cal_buf, cal_size);
+				info("Camera : the dumped Cal. data was applied successfully.\n");
+			} else {
+				info("Camera : Did not load dumped Cal. Sensor version is lower than V004.\n");
+			}
 #else
-		memcpy((void *)(cal_ptr) ,(void *)cal_buf, FIMC_IS_MAX_CAL_SIZE);
-		info("Camera : the dumped Cal. data was applied successfully.\n");
+			memcpy((void *)(cal_ptr) ,(void *)cal_buf, cal_size);
+			info("Camera : the dumped Cal. data was applied successfully.\n");
 #endif
-	} else {
-		if (crc32_header_check == true) {
-			err("Camera : CRC32 error but only header section is no problem.");
-			memset((void *)(cal_ptr + 0x1000), 0xFF, FIMC_IS_MAX_CAL_SIZE - 0x1000);
 		} else {
-			err("Camera : CRC32 error for all section.");
-			memset((void *)(cal_ptr), 0xFF, FIMC_IS_MAX_CAL_SIZE);
-			ret = -EIO;
+			if (crc32_header_check_front  == true) {
+				err("Camera : CRC32 error but only header section is no problem.");
+				memset((void *)(cal_ptr + 0x1000), 0xFF, cal_size - 0x1000);
+			} else {
+				err("Camera : CRC32 error for all section.");
+				memset((void *)(cal_ptr), 0xFF, cal_size);
+				ret = -EIO;
+			}
+		}
+	} else {
+		if (crc32_check == true) {
+#ifdef CONFIG_COMPANION_USE
+			if (fimc_is_sec_check_from_ver(core, position)) {
+				memcpy((void *)(cal_ptr) ,(void *)cal_buf, cal_size);
+				info("Camera : the dumped Cal. data was applied successfully.\n");
+			} else {
+				info("Camera : Did not load dumped Cal. Sensor version is lower than V004.\n");
+			}
+#else
+			memcpy((void *)(cal_ptr) ,(void *)cal_buf, cal_size);
+			info("Camera : the dumped Cal. data was applied successfully.\n");
+#endif
+		} else {
+			if (crc32_header_check == true) {
+				err("Camera : CRC32 error but only header section is no problem.");
+				memset((void *)(cal_ptr + 0x1000), 0xFF, cal_size - 0x1000);
+			} else {
+				err("Camera : CRC32 error for all section.");
+				memset((void *)(cal_ptr), 0xFF, cal_size);
+				ret = -EIO;
+			}
 		}
 	}
 
-	fimc_is_ischain_cache_flush(device, FIMC_IS_CAL_START_ADDR,
-		FIMC_IS_MAX_CAL_SIZE);
+	fimc_is_ischain_cache_flush(device, start_addr, cal_size);
+
 	if (ret)
 		mwarn("calibration loading is fail", device);
 	else
@@ -1474,12 +1530,10 @@ static int fimc_is_itf_f_param(struct fimc_is_device_ischain *device)
 	if (path->group[GROUP_SLOT_3AA] != GROUP_ID_INVALID)
 		group |= (GROUP_ID(path->group[GROUP_SLOT_3AA]) & GROUP_ID_PARM_MASK);
 
-	if (((path->group[GROUP_SLOT_ISP] != GROUP_ID_INVALID)) &&
-		!test_bit(FIMC_IS_GROUP_OTF_INPUT, &device->group_isp.state))
+	if (path->group[GROUP_SLOT_ISP] != GROUP_ID_INVALID)
 		group |= (GROUP_ID(path->group[GROUP_SLOT_ISP]) & GROUP_ID_PARM_MASK);
 
-	if (((path->group[GROUP_SLOT_DIS] != GROUP_ID_INVALID)) &&
-		!test_bit(FIMC_IS_GROUP_OTF_INPUT, &device->group_dis.state))
+	if (path->group[GROUP_SLOT_DIS] != GROUP_ID_INVALID)
 		group |= (GROUP_ID(path->group[GROUP_SLOT_DIS]) & GROUP_ID_PARM_MASK);
 
 	setfile = (device->setfile & FIMC_IS_SETFILE_MASK);
@@ -2125,6 +2179,11 @@ int fimc_is_itf_grp_shot(struct fimc_is_device_ischain *device,
 	BUG_ON(!frame);
 	BUG_ON(!frame->shot);
 
+	frame->shot->uctl.scalerUd.sourceAddress[0] = frame->dvaddr_buffer[0];
+	frame->shot->uctl.scalerUd.sourceAddress[1] = frame->dvaddr_buffer[1];
+	frame->shot->uctl.scalerUd.sourceAddress[2] = frame->dvaddr_buffer[2];
+	frame->shot->uctl.scalerUd.sourceAddress[3] = frame->dvaddr_buffer[3];
+
 	/* Cache Flush */
 	fimc_is_ischain_meta_flush(frame);
 
@@ -2156,7 +2215,6 @@ int fimc_is_itf_grp_shot(struct fimc_is_device_ischain *device,
 	ret = fimc_is_hw_shot_nblk(device->interface,
 		device->instance,
 		GROUP_ID(group->id),
-		frame->dvaddr_buffer[0],
 		frame->dvaddr_shot,
 		frame->fcount,
 		frame->rcount);
@@ -2325,7 +2383,7 @@ int fimc_is_ischain_power(struct fimc_is_device_ischain *device, int on)
 		}
 #endif
 
-		if (core->current_position == SENSOR_POSITION_FRONT) {
+		if (core->current_position == SENSOR_POSITION_FRONT || supend_resume_disable) {
 			fimc_is_itf_set_fwboot(device, COLD_BOOT);
 		}
 
@@ -2373,6 +2431,11 @@ int fimc_is_ischain_power(struct fimc_is_device_ischain *device, int on)
 			err("fimc_is_ischain_runtime_resume_post is fail(%d)", ret);
 			goto p_err;
 		}
+
+#ifdef CONFIG_USE_VENDER_FEATURE
+		if (device->interface->need_cold_reset)
+			device->interface->need_cold_reset = false;
+#endif
 
 		set_bit(FIMC_IS_ISCHAIN_POWER_ON, &device->state);
 	} else {
@@ -2572,6 +2635,7 @@ static int fimc_is_ischain_s_path(struct fimc_is_device_ischain *device,
 #ifdef ENABLE_FULL_BYPASS
 		control->cmd = CONTROL_COMMAND_STOP;
 		control->bypass = CONTROL_BYPASS_ENABLE;
+		minfo(" TPU FULL BYPASS\n", device);
 #else
 		/* HACK : TPU SHOULD BE FULL BYPASS NOT BYPASS AS HARDWARE STALL BUG */
 		control->cmd = CONTROL_COMMAND_STOP;
@@ -2608,7 +2672,6 @@ static int fimc_is_ischain_s_path(struct fimc_is_device_ischain *device,
 
 		fimc_is_subdev_odc_bypass(device, NULL, lindex, hindex, indexes, true);
 		fimc_is_subdev_drc_bypass(device, NULL, lindex, hindex, indexes, true);
-		fimc_is_subdev_dnr_bypass(device, NULL, lindex, hindex, indexes, true);
 
 		scp_param->control.cmd = CONTROL_COMMAND_START;
 		*lindex |= LOWBIT_OF(PARAM_SCALERP_CONTROL);
@@ -2667,7 +2730,6 @@ static int fimc_is_ischain_buf_tag(struct fimc_is_device_ischain *device,
 		frame->stream->findex = ldr_frame->index;
 		frame->stream->fcount = ldr_frame->fcount;
 		set_bit(subdev->id, &ldr_frame->out_flag);
-		set_bit(REQ_FRAME, &frame->req_flag);
 		fimc_is_frame_trans_req_to_pro(framemgr, frame);
 	} else {
 		target_addr[0] = 0;
@@ -3320,8 +3382,7 @@ static int fimc_is_ischain_init(struct fimc_is_device_ischain *device,
 	path = &device->path;
 
 	if (test_bit(FIMC_IS_ISCHAIN_INIT, &device->state)) {
-		merr("chain is already init", device);
-		ret = -EINVAL;
+		minfo("stream is already initialized", device);
 		goto p_err;
 	}
 
@@ -3439,6 +3500,7 @@ static int fimc_is_ischain_init(struct fimc_is_device_ischain *device,
 #endif
 
 	device->module = module_id;
+	clear_bit(FIMC_IS_ISCHAIN_INITING, &device->state);
 	set_bit(FIMC_IS_ISCHAIN_INIT, &device->state);
 
 p_err:
@@ -3481,7 +3543,6 @@ static int fimc_is_ischain_init_wrap(struct fimc_is_device_ischain *device,
 	core = container_of(groupmgr, struct fimc_is_core, groupmgr);
 	atomic_inc(&device->init_cnt);
 	set_bit(FIMC_IS_ISCHAIN_INITING, &device->state);
-	clear_bit(FIMC_IS_ISCHAIN_INIT, &device->state);
 	mdbgd_ischain("%s(%d, %d)\n", device, __func__,
 		atomic_read(&device->init_cnt), atomic_read(&device->group_open_cnt));
 
@@ -3559,13 +3620,11 @@ static int fimc_is_ischain_init_wrap(struct fimc_is_device_ischain *device,
 
 		ret = fimc_is_ischain_init(device, module_id);
 		if (ret) {
-			merr("fimc_is_chain_close is fail(%d)", device, ret);
+			merr("fimc_is_ischain_init is fail(%d)", device, ret);
 			goto p_err;
 		}
 
 		atomic_set(&device->init_cnt, 0);
-		clear_bit(FIMC_IS_ISCHAIN_INITING, &device->state);
-		set_bit(FIMC_IS_ISCHAIN_INIT, &device->state);
 	}
 
 p_err:
@@ -3892,10 +3951,11 @@ p_err:
 	return ret;
 }
 
-int fimc_is_ischain_3aa_reqbufs(struct fimc_is_device_ischain *device,
+static int fimc_is_ischain_3aa_reqbufs(void *qdevice,
 	u32 count)
 {
 	int ret = 0;
+	struct fimc_is_device_ischain *device = qdevice;
 	struct fimc_is_group *group;
 
 	BUG_ON(!device);
@@ -4074,7 +4134,8 @@ p_err:
 const struct fimc_is_queue_ops fimc_is_ischain_3aa_ops = {
 	.start_streaming	= fimc_is_ischain_3aa_start,
 	.stop_streaming		= fimc_is_ischain_3aa_stop,
-	.s_format		= fimc_is_ischain_3aa_s_format
+	.s_format		= fimc_is_ischain_3aa_s_format,
+	.request_bufs		= fimc_is_ischain_3aa_reqbufs
 };
 
 static int fimc_is_ischain_3ap_start(struct fimc_is_device_ischain *device,
@@ -4666,10 +4727,11 @@ p_err:
 	return ret;
 }
 
-int fimc_is_ischain_isp_reqbufs(struct fimc_is_device_ischain *device,
+static int fimc_is_ischain_isp_reqbufs(void *qdevice,
 	u32 count)
 {
 	int ret = 0;
+	struct fimc_is_device_ischain *device = qdevice;
 	struct fimc_is_group *group;
 
 	BUG_ON(!device);
@@ -4833,7 +4895,8 @@ p_err:
 const struct fimc_is_queue_ops fimc_is_ischain_isp_ops = {
 	.start_streaming	= fimc_is_ischain_isp_start,
 	.stop_streaming		= fimc_is_ischain_isp_stop,
-	.s_format		= fimc_is_ischain_isp_s_format
+	.s_format		= fimc_is_ischain_isp_s_format,
+	.request_bufs		= fimc_is_ischain_isp_reqbufs
 };
 
 static int fimc_is_ischain_ixc_start(struct fimc_is_device_ischain *device,
@@ -5309,6 +5372,26 @@ p_err:
 	return ret;
 }
 
+static int fimc_is_ischain_dis_reqbufs(void *qdevice,
+	u32 count)
+{
+	int ret = 0;
+	struct fimc_is_device_ischain *device = qdevice;
+	struct fimc_is_group *group;
+
+	BUG_ON(!device);
+
+	group = &device->group_dis;
+
+	if (!count) {
+		ret = fimc_is_itf_unmap(device, GROUP_ID(group->id));
+		if (ret)
+			merr("fimc_is_itf_unmap is fail(%d)", device, ret);
+	}
+
+	return ret;
+}
+
 static int fimc_is_ischain_dis_s_format(void *qdevice,
 	struct fimc_is_queue *queue)
 {
@@ -5457,7 +5540,8 @@ p_err:
 const struct fimc_is_queue_ops fimc_is_ischain_dis_ops = {
 	.start_streaming	= fimc_is_ischain_dis_start,
 	.stop_streaming		= fimc_is_ischain_dis_stop,
-	.s_format		= fimc_is_ischain_dis_s_format
+	.s_format		= fimc_is_ischain_dis_s_format,
+	.request_bufs		= fimc_is_ischain_dis_reqbufs
 };
 
 static int fimc_is_ischain_scc_start(struct fimc_is_device_ischain *device,
@@ -6912,6 +6996,10 @@ static int fimc_is_ischain_3aa_shot(struct fimc_is_device_ischain *device,
 		if (captureIntent != AA_CAPTURE_INTENT_CUSTOM) {
 			frame->shot->ctl.aa.captureIntent = captureIntent;
 			group->intent_ctl.captureIntent = AA_CAPTURE_INTENT_CUSTOM;
+			frame->shot->ctl.aa.vendor_captureCount = group->intent_ctl.vendor_captureCount;
+			group->intent_ctl.vendor_captureCount = 0;
+			minfo("frame count(%d), intent(%d), count(%d)\n", device, frame->fcount,
+				frame->shot->ctl.aa.captureIntent, frame->shot->ctl.aa.vendor_captureCount);
 		}
 	}
 
@@ -6985,10 +7073,10 @@ p_err:
 	if (ret) {
 		mgrerr(" SKIP(%d) : %d\n", device, group, check_frame, check_frame->index, ret);
 	} else {
+		set_bit(group->leader.id, &frame->out_flag);
 		framemgr_e_barrier_irqs(framemgr, FMGR_IDX_25, flags);
 		fimc_is_frame_trans_req_to_pro(framemgr, frame);
 		framemgr_x_barrier_irqr(framemgr, FMGR_IDX_25, flags);
-		set_bit(REQ_3AA_SHOT, &frame->req_flag);
 	}
 
 	return ret;
@@ -7134,10 +7222,10 @@ p_err:
 	if (ret) {
 		mgrerr(" SKIP(%d) : %d\n", device, group, check_frame, check_frame->index, ret);
 	} else {
+		set_bit(group->leader.id, &frame->out_flag);
 		framemgr_e_barrier_irqs(framemgr, FMGR_IDX_26, flags);
 		fimc_is_frame_trans_req_to_pro(framemgr, frame);
 		framemgr_x_barrier_irqr(framemgr, FMGR_IDX_26, flags);
-		set_bit(REQ_ISP_SHOT, &frame->req_flag);
 	}
 
 	return ret;
@@ -7244,10 +7332,10 @@ p_err:
 	if (ret) {
 		mgrerr(" SKIP(%d) : %d\n", device, group, check_frame, check_frame->index, ret);
 	} else {
+		set_bit(group->leader.id, &frame->out_flag);
 		framemgr_e_barrier_irqs(framemgr, FMGR_IDX_27, flags);
 		fimc_is_frame_trans_req_to_pro(framemgr, frame);
 		framemgr_x_barrier_irqr(framemgr, FMGR_IDX_27, flags);
-		set_bit(REQ_DIS_SHOT, &frame->req_flag);
 	}
 
 	return ret;

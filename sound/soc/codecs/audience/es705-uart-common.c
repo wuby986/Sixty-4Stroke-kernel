@@ -293,6 +293,17 @@ struct es_stream_device uart_streamdev = {
 	.wait = es705_uart_wait,
 	.config = es705_uart_config,
 	.intf = ES705_UART_INTF,
+#ifdef CONFIG_SND_SOC_ES_STREAM_FS_STORER
+	.fs_open = stream_fs_open,
+	.fs_write = stream_fs_write,
+	.fs_close = stream_fs_close,
+	.fp = NULL,
+	.dev_fp = NULL,
+	.cnt = 0,
+	.always_on = 0,
+	.route_status = 0,
+	.streaming = 0,
+#endif
 };
 
 struct es_datablock_device uart_datablockdev = {
@@ -300,6 +311,7 @@ struct es_datablock_device uart_datablockdev = {
 	.read = es705_uart_read,
 	.close = es705_uart_close,
 	.wait = es705_uart_wait,
+	.config = es705_uart_config,
 	.rdb = es705_uart_dev_rdb,
 	.wdb = es705_uart_dev_wdb,
 	.intf = ES705_UART_INTF,

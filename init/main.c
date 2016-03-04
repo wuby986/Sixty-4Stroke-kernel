@@ -111,7 +111,10 @@ extern void tc_init(void);
 int boot_mode_security;
 EXPORT_SYMBOL(boot_mode_security);
 #endif
-
+#ifdef CONFIG_TIMA_RKP
+int rkp_support_large_memory;
+EXPORT_SYMBOL(rkp_support_large_memory);
+#endif
 /*
  * Debug helper: via this flag we know that we are in 'early bootup code'
  * where only the boot processor is running with IRQ disabled.  This means
@@ -503,6 +506,7 @@ static void rkp_init(void)
 	init.init_mm_pgd = (u64)__pa(swapper_pg_dir);
 	init.id_map_pgd = (u64)__pa(idmap_pg_dir);
 	init.rkp_pgt_bitmap = (u64)__pa(rkp_pgt_bitmap);
+	init.rkp_map_bitmap = (u64)__pa(rkp_map_bitmap);
 	init.rkp_pgt_bitmap_size = RKP_PGT_BITMAP_LEN;
 	init.zero_pg_addr = page_to_phys(empty_zero_page);
 	init._text = (u64) _text;
@@ -515,8 +519,9 @@ static void rkp_init(void)
 	init.extra_memory_size = 0x600000;
 	init._srodata = (u64) __start_rodata;
 	init._erodata =(u64) __end_rodata;
-	rkp_started = 1;
+	init.large_memory = rkp_support_large_memory;
 	rkp_call(RKP_INIT, (u64)&init, 0, 0, 0, 0);
+	rkp_started = 1;
 	return;
 }
 #endif
@@ -527,9 +532,12 @@ void kdp_init(void)
 	kdp_init_t cred;
 
 	cred.credSize 	= sizeof(struct cred);
+	cred.sp_size	= rkp_get_task_sec_size();
 	cred.pgd_mm 	= offsetof(struct mm_struct,pgd);
 	cred.uid_cred	= offsetof(struct cred,uid);
 	cred.euid_cred	= offsetof(struct cred,euid);
+	cred.gid_cred	= offsetof(struct cred,gid);
+	cred.egid_cred	= offsetof(struct cred,egid);
 
 	cred.bp_pgd_cred 	= offsetof(struct cred,bp_pgd);
 	cred.bp_task_cred 	= offsetof(struct cred,bp_task);
@@ -542,7 +550,9 @@ void kdp_init(void)
 	cred.pid_task		= offsetof(struct task_struct,pid);
 	cred.rp_task		= offsetof(struct task_struct,real_parent);
 	cred.comm_task 		= offsetof(struct task_struct,comm);
-	
+
+	cred.bp_cred_secptr 	= rkp_get_offset_bp_cred();
+
 	cred.task_threadinfo = offsetof(struct thread_info,task);
 	rkp_call(RKP_CMDID(0x40),(u64)&cred,0,0,0,0);
 }
@@ -589,6 +599,7 @@ asmlinkage void __init start_kernel(void)
 	build_all_zonelists(NULL, NULL);
 	page_alloc_init();
 
+	printk(KERN_INFO "MDM_LOG - Start Kernel\n");
 	pr_notice("Kernel command line: %s\n", boot_command_line);
 	parse_early_param();
 	parse_args("Booting kernel", static_command_line, __start___param,

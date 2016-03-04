@@ -93,16 +93,21 @@ struct arizona_priv {
 
 	int num_inputs;
 	unsigned int in_pending;
+
+	unsigned int out_up_pending;
+	unsigned int out_up_delay;
+	unsigned int out_down_pending;
+	unsigned int out_down_delay;
 };
 
 #define ARIZONA_NUM_MIXER_INPUTS 134
 #define ARIZONA_V2_NUM_MIXER_INPUTS 138
 
 extern const unsigned int arizona_mixer_tlv[];
-extern const char *arizona_mixer_texts[ARIZONA_NUM_MIXER_INPUTS];
-extern int arizona_mixer_values[ARIZONA_NUM_MIXER_INPUTS];
-extern const char *arizona_v2_mixer_texts[ARIZONA_V2_NUM_MIXER_INPUTS];
-extern int arizona_v2_mixer_values[ARIZONA_V2_NUM_MIXER_INPUTS];
+extern const char * const arizona_mixer_texts[ARIZONA_NUM_MIXER_INPUTS];
+extern unsigned int arizona_mixer_values[ARIZONA_NUM_MIXER_INPUTS];
+extern const char * const arizona_v2_mixer_texts[ARIZONA_V2_NUM_MIXER_INPUTS];
+extern unsigned int arizona_v2_mixer_values[ARIZONA_V2_NUM_MIXER_INPUTS];
 
 #define ARIZONA_GAINMUX_CONTROLS(name, base) \
 	SOC_SINGLE_RANGE_TLV(name " Input Volume", base + 1,		\
@@ -258,10 +263,10 @@ extern int arizona_v2_mixer_values[ARIZONA_V2_NUM_MIXER_INPUTS];
 #define WM8280_ANC_INPUT_ENUM_SIZE 13
 #define CLEARWATER_ANC_INPUT_ENUM_SIZE 19
 
-extern const char *arizona_rate_text[ARIZONA_RATE_ENUM_SIZE];
-extern const int arizona_rate_val[ARIZONA_RATE_ENUM_SIZE];
-extern const char *arizona_sample_rate_text[ARIZONA_SAMPLE_RATE_ENUM_SIZE];
-extern const int arizona_sample_rate_val[ARIZONA_SAMPLE_RATE_ENUM_SIZE];
+extern const char * const arizona_rate_text[ARIZONA_RATE_ENUM_SIZE];
+extern const unsigned int arizona_rate_val[ARIZONA_RATE_ENUM_SIZE];
+extern const char * const arizona_sample_rate_text[ARIZONA_SAMPLE_RATE_ENUM_SIZE];
+extern const unsigned int arizona_sample_rate_val[ARIZONA_SAMPLE_RATE_ENUM_SIZE];
 
 extern const struct soc_enum arizona_sample_rate[];
 extern const struct soc_enum arizona_isrc_fsl[];
@@ -311,6 +316,12 @@ extern int arizona_out_ev(struct snd_soc_dapm_widget *w,
 extern int arizona_hp_ev(struct snd_soc_dapm_widget *w,
 			 struct snd_kcontrol *kcontrol,
 			 int event);
+extern int florida_hp_ev(struct snd_soc_dapm_widget *w,
+			 struct snd_kcontrol *kcontrol,
+			 int event);
+extern int clearwater_hp_ev(struct snd_soc_dapm_widget *w,
+			    struct snd_kcontrol *kcontrol,
+			    int event);
 extern int arizona_anc_ev(struct snd_soc_dapm_widget *w,
 			  struct snd_kcontrol *kcontrol,
 			  int event);
@@ -331,12 +342,12 @@ extern int arizona_set_sysclk(struct snd_soc_codec *codec, int clk_id,
 
 extern int arizona_cache_and_clear_sources(struct arizona *arizona,
 					   const int *sources,
-					   int *cache,
+					   unsigned int *cache,
 					   int lim);
 
 extern int arizona_restore_sources(struct arizona *arizona,
 				   const int *sources,
-				   int *cache,
+				   unsigned int *cache,
 				   int lim);
 
 extern void clearwater_spin_sysclk(struct arizona *arizona);
@@ -401,6 +412,8 @@ extern int florida_put_dre(struct snd_kcontrol *kcontrol,
 			   struct snd_ctl_elem_value *ucontrol);
 extern int clearwater_put_dre(struct snd_kcontrol *kcontrol,
 			      struct snd_ctl_elem_value *ucontrol);
+extern int arizona_put_out4_edre(struct snd_kcontrol *kcontrol,
+				 struct snd_ctl_elem_value *ucontrol);
 
 extern struct regmap *arizona_get_regmap_dsp(struct snd_soc_codec *codec);
 

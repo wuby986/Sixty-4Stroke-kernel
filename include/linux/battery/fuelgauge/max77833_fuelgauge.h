@@ -41,11 +41,25 @@
 
 #define ALERT_EN 0x04
 
+#define MAX77833_FG_VMN_IM		(1 << 0)
+#define MAX77833_FG_VMX_IM		(1 << 1)
+#define MAX77833_FG_TMN_IM		(1 << 2)
+#define MAX77833_FG_TMX_IM		(1 << 3)
+#define MAX77833_FG_SMN_IM		(1 << 4)
+#define MAX77833_FG_SMX_IM		(1 << 5)
+#define MAX77833_FG_IMX_IM		(1 << 6)
+#define MAX77833_FG_IWMX_IM		(1 << 7)
 
 struct sec_fuelgauge_reg_data {
 	u8 reg_addr;
 	u8 reg_data1;
 	u8 reg_data2;
+};
+
+enum max77833_valrt_mode {
+	MAX77833_NORMAL_MODE = 0,
+	MAX77833_VEMPTY_MODE,
+	MAX77833_VEMPTY_RECOVERY_MODE,
 };
 
 struct max77833_fg_info {
@@ -83,9 +97,14 @@ enum {
 	MAX77833_FG_VF_SOC,
 	MAX77833_FG_AV_SOC,
 	MAX77833_FG_FULLCAP,
+	MAX77833_FG_FULLCAPNOM,
+	MAX77833_FG_FULLCAPREP,
 	MAX77833_FG_MIXCAP,
 	MAX77833_FG_AVCAP,
 	MAX77833_FG_REPCAP,
+	MAX77833_FG_CYCLE,
+	MAX77833_FG_ISYS,
+	MAX77833_FG_AVGISYS,
 };
 
 enum {
@@ -103,6 +122,8 @@ enum {
 #define CURRENT_RANGE_MAX_NUM	5
 
 struct battery_data_t {
+	u32 V_empty;
+	u32 V_empty_origin;
 	u32 QResidual20;
 	u32 QResidual30;
 	u32 Capacity;
@@ -139,6 +160,12 @@ struct battery_data_t {
 #define STABLE_LOW_BATTERY_DIFF_LOWBATT	10
 #define LOW_BATTERY_SOC_REDUCE_UNIT	10
 
+struct cv_slope{
+	int fg_current;
+	int soc;
+	int time;
+};
+
 struct max77833_fuelgauge_data {
 	struct device           *dev;
 	struct i2c_client       *i2c;
@@ -147,7 +174,8 @@ struct max77833_fuelgauge_data {
 	struct max77833_platform_data *max77833_pdata;
 	sec_fuelgauge_platform_data_t *pdata;
 	struct power_supply		psy_fg;
-	struct delayed_work isr_work;
+	struct delayed_work salrt_irq_work;
+	struct delayed_work valrt_irq_work;
 
 	int cable_type;
 	bool is_charging;
@@ -160,7 +188,8 @@ struct max77833_fuelgauge_data {
 	struct battery_data_t        *battery_data;
 
 	bool is_fuel_alerted;
-	struct wake_lock fuel_alert_wake_lock;
+	struct wake_lock fuel_salrt_wake_lock;
+	struct wake_lock fuel_valrt_wake_lock;
 
 	unsigned int capacity_old;	/* only for atomic calculation */
 	unsigned int capacity_max;	/* only for dynamic calculation */
@@ -174,7 +203,25 @@ struct max77833_fuelgauge_data {
 	u8 reg_data[2];
 
 	unsigned int pre_soc;
-	int fg_irq;
+	int fg_vmn_irq;
+	int fg_smn_irq;
+
+	int raw_capacity;
+	int current_now;
+	int current_avg;
+	int isys_current_now;
+	int isys_current_avg;
+	struct cv_slope *cv_data;
+	int cv_data_lenth;
+
+	bool using_temp_compensation;
+	bool low_temp_compensation_en;
+	bool using_hw_vempty;
+	bool hw_v_empty;
+	int sw_v_empty;
+
+	unsigned int low_temp_limit;
+	unsigned int low_temp_recovery;
 };
 
 #endif /* __MAX77833_FUELGAUGE_H */

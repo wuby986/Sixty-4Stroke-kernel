@@ -45,7 +45,7 @@ int accel_open_calibration(struct ssp_data *data)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0666);
+	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0660);
 	if (IS_ERR(cal_filp)) {
 		set_fs(old_fs);
 		iRet = PTR_ERR(cal_filp);
@@ -79,7 +79,7 @@ static int enable_accel_for_cal(struct ssp_data *data)
 {
 	u8 uBuf[2] = {0, 10};
 
-	if (atomic_read(&data->aSensorEnable) & (1 << ACCELEROMETER_SENSOR)) {
+	if (atomic64_read(&data->aSensorEnable) & (1 << ACCELEROMETER_SENSOR)) {
 		if (get_msdelay(data->adDelayBuf[ACCELEROMETER_SENSOR]) != 10) {
 			send_instruction(data, CHANGE_DELAY,
 				ACCELEROMETER_SENSOR, uBuf, 2);
@@ -97,7 +97,7 @@ static void disable_accel_for_cal(struct ssp_data *data, int iDelayChanged)
 {
 	u8 uBuf[2] = {0, 10};
 
-	if (atomic_read(&data->aSensorEnable) & (1 << ACCELEROMETER_SENSOR)) {
+	if (atomic64_read(&data->aSensorEnable) & (1 << ACCELEROMETER_SENSOR)) {
 		uBuf[1] = get_msdelay(data->adDelayBuf[ACCELEROMETER_SENSOR]);
 		uBuf[0] = get_delay_cmd(uBuf[1]);
 		if (iDelayChanged)
@@ -148,7 +148,7 @@ static int accel_do_calibrate(struct ssp_data *data, int iEnable)
 	set_fs(KERNEL_DS);
 
 	cal_filp = filp_open(CALIBRATION_FILE_PATH,
-			O_CREAT | O_TRUNC | O_WRONLY, 0666);
+			O_CREAT | O_TRUNC | O_WRONLY, 0660);
 	if (IS_ERR(cal_filp)) {
 		pr_err("[SSP]: %s - Can't open calibration file\n", __func__);
 		set_fs(old_fs);

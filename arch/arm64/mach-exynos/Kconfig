@@ -64,6 +64,12 @@ config EXYNOS_ASV_MARGIN_TEST
 	default n
 	depends on EXYNOS_ASV
 
+config SKIP_HW_BREAKPOINT
+	bool "support skip hw breakpoint"
+	default n
+	help
+	  Support early param for T32 onchip breakpoint
+
 config CAL_SYS_PWRDOWN
 	bool "Enable CAL for system level power down"
 
@@ -82,6 +88,16 @@ config EXYNOS5_DYNAMIC_CPU_HOTPLUG
 	depends on CPU_FREQ
 	help
 		Enable Dynamic CPU Hotplug
+
+config EXYNOS5_DYNAMIC_CPU_HOTPLUG_SLEEP_PREPARE
+        int "Activate number of cores when sleep"
+        depends on EXYNOS5_DYNAMIC_CPU_HOTPLUG
+        default 1
+        help
+          When gose to sleep, activate some cores for performace
+          during sleep/wakeup sequence.
+          This config set the number of activate cores.
+          defaut value is "4" to activate all cores in cluster0.
 
 config EXYNOS_CONTENT_PATH_PROTECTION
 	bool "Exynos Content Path Protection"
@@ -220,6 +236,7 @@ config MACH_UNIVERSAL7420
 	help
 	  Machine support for Samsung EXYNOS7420 machine with device tree enabled.
 	  Select this if a fdt blob is available for the EXYNOS7420 SoC based board.
+
 endmenu
 
 # Reset IPs during LPA/DSTOP
@@ -277,8 +294,27 @@ config TIMA_RKP
 
 config RKP_KDP
 	bool "Protection for cred structure"
-	depends on TIMA
+	depends on TIMA_RKP
 	default n
 	help
 		Prevents unauthorized cred modification.
+
+config RKP_DMAP_PROT
+	bool "Page Double Mapping protection"
+	depends on (TIMA_RKP && RKP_KDP)
+	default n
+	help
+		Prevents unauthorized cred modification.
+config RKP_NS_PROT
+	bool "Protection for cred structure"
+	depends on (TIMA_RKP && RKP_KDP)
+	default n
+	help
+		Prevents unauthorized name space modification.
+
+config SEC_BAT_AUT
+	bool "Samsung TN Bat Automation Test Feature"
+	default n
+	help
+	  Samsung TN Bat Automation Test
 

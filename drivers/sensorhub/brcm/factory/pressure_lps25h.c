@@ -55,7 +55,7 @@ int pressure_open_calibration(struct ssp_data *data)
 	old_fs = get_fs();
 	set_fs(KERNEL_DS);
 
-	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0666);
+	cal_filp = filp_open(CALIBRATION_FILE_PATH, O_RDONLY, 0660);
 	if (IS_ERR(cal_filp)) {
 		iErr = PTR_ERR(cal_filp);
 		if (iErr != -ENOENT)
@@ -117,7 +117,7 @@ static ssize_t pressure_cabratioin_show(struct device *dev,
 
 	return sprintf(buf, "%d\n", data->iPressureCal);
 }
-/*
+#if 0
 static ssize_t eeprom_check_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
@@ -147,7 +147,7 @@ static ssize_t eeprom_check_show(struct device *dev,
 	exit:
 	return snprintf(buf, PAGE_SIZE, "%d", chTempBuf);
 }
-*/
+#endif
 /* sysfs for vendor & name */
 static ssize_t pressure_vendor_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -163,6 +163,20 @@ static ssize_t pressure_name_show(struct device *dev,
 	return sprintf(buf, "%s\n", CHIP_ID);
 }
 
+static ssize_t pressure_temperature_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct ssp_data *data = dev_get_drvdata(dev);
+	s32 temperature = 0;
+	s32 float_temperature = 0;
+	s32 temp = 0;
+	temp = (s32) (data->buf[PRESSURE_SENSOR].pressure[1]);
+	temperature = (4250) + ((temp / (120 * 4))*100); //(42.5f) + (temperature/(120 * 4));
+	float_temperature = ((temperature%100) > 0 ? (temperature%100) : -(temperature%100));
+	
+	return sprintf(buf, "%d.%02d\n", (temperature/100), float_temperature);
+}
+
 static DEVICE_ATTR(vendor,  S_IRUGO, pressure_vendor_show, NULL);
 static DEVICE_ATTR(name,  S_IRUGO, pressure_name_show, NULL);
 /*static DEVICE_ATTR(eeprom_check, S_IRUGO, eeprom_check_show, NULL); */
@@ -170,7 +184,9 @@ static DEVICE_ATTR(calibration,  S_IRUGO | S_IWUSR | S_IWGRP,
 	pressure_cabratioin_show, pressure_cabratioin_store);
 static DEVICE_ATTR(sea_level_pressure, /*S_IRUGO |*/ S_IWUSR | S_IWGRP,
 	NULL, sea_level_pressure_store);
-/*
+static DEVICE_ATTR(temperature, S_IRUGO, pressure_temperature_show, NULL);
+
+#if 0
 static struct device_attribute *pressure_attrs_bmp280[] = {
 	&dev_attr_vendor,
 	&dev_attr_name,
@@ -179,12 +195,13 @@ static struct device_attribute *pressure_attrs_bmp280[] = {
 	&dev_attr_eeprom_check,
 	NULL,
 };
-*/
+#endif
 static struct device_attribute *pressure_attrs[] = {
 	&dev_attr_vendor,
 	&dev_attr_name,
 	&dev_attr_calibration,
 	&dev_attr_sea_level_pressure,
+	&dev_attr_temperature,
 	NULL,
 };
 

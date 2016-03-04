@@ -32,10 +32,10 @@
 #include "governor.h"
 #include <mach/bts.h>
 
-#define DEVFREQ_MIF_REBOOT_FREQ	(1656000/2)
+#define DEVFREQ_MIF_REBOOT_FREQ	(1672000/2)
 #define DEVFREQ_INITIAL_FREQ	(3104000/2)
 #define DEVFREQ_POLLING_PERIOD	(0)
-#define DLL_ON_FREQ		(1656000/2)
+#define DLL_ON_FREQ		(1672000/2)
 
 extern struct devfreq_opp_table devfreq_mif_opp_list[];
 
@@ -50,7 +50,7 @@ static struct devfreq_simple_exynos_data exynos7_devfreq_mif_governor_data = {
 };
 
 static struct exynos_devfreq_platdata exynos7420_qos_mif = {
-	.default_qos		= 552000/2,
+	.default_qos		= 518000/2,
 };
 
 static struct ppmu_info ppmu_mif[] = {
@@ -81,6 +81,7 @@ static struct devfreq_exynos devfreq_mif_exynos = {
 
 static unsigned long current_freq;
 static bool is_freq_changing;
+unsigned long *reference_current_freq;
 
 static struct pm_qos_request exynos7_mif_qos;
 static struct pm_qos_request boot_mif_qos;
@@ -275,6 +276,7 @@ static int exynos7_init_mif_table(struct device *dev,
 			opp_disable(dev, devfreq_mif_opp_list[3].freq);
 			break;
 		case 4 :
+		case 12 :
 			opp_disable(dev, devfreq_mif_opp_list[0].freq);
 			opp_disable(dev, devfreq_mif_opp_list[1].freq);
 			break;
@@ -293,6 +295,7 @@ static int exynos7_init_mif_table(struct device *dev,
 			break;
 		}
 	}
+	opp_disable(dev, devfreq_mif_opp_list[8].freq);
 
 	data->volt_of_avail_max_freq = get_volt_of_avail_max_freq(dev);
 	pr_info("DEVFREQ(MIF) : voltage of available max freq : %7uuV\n",
@@ -426,6 +429,9 @@ static int exynos7_devfreq_mif_probe(struct platform_device *pdev)
 #endif
 	data->use_dvfs = true;
 
+	/* add reference frequency */
+	reference_current_freq = &current_freq;
+
 	return ret;
 err_nb:
 	devfreq_remove_device(data->devfreq);
@@ -462,15 +468,29 @@ static int exynos7_devfreq_mif_remove(struct platform_device *pdev)
 }
 
 extern void exynos7_devfreq_set_tREFI_1x(struct devfreq_data_mif *data);
+extern unsigned int get_limit_voltage(unsigned int voltage, unsigned int volt_offset,
+					unsigned int max_volt);
+extern int exynos7_devfreq_mif_set_volt(struct devfreq_data_mif *data,
+					unsigned long volt,
+					unsigned long volt_range);
+#define SUSPEND_LV	0
 static int exynos7_devfreq_mif_suspend(struct device *dev)
 {
 	struct platform_device *pdev = container_of(dev, struct platform_device, dev);
 	struct devfreq_data_mif *data = platform_get_drvdata(pdev);
+	unsigned long suspend_volt;
 
 	exynos7_devfreq_set_tREFI_1x(data);
 
+	suspend_volt = get_limit_voltage(devfreq_mif_opp_list[SUSPEND_LV].volt, data->volt_offset,
+					data->volt_of_avail_max_freq);
+
 	if (pm_qos_request_active(&exynos7_mif_qos))
 		pm_qos_update_request(&exynos7_mif_qos, exynos7_devfreq_mif_profile.initial_freq);
+
+	exynos7_devfreq_mif_set_volt(data, suspend_volt, suspend_volt + VOLT_STEP);
+
+	pr_info("DEVFREQ(MIF): suspend voltage(%ld %d)\n", suspend_volt, regulator_get_voltage(data->vdd_mif));
 
 	return 0;
 }

@@ -65,6 +65,12 @@
 #define ECRYPTFS_MAX_NUM_USERS 32768
 #define ECRYPTFS_XATTR_NAME "user.ecryptfs"
 
+#if defined(CONFIG_MMC_DW_FMP_ECRYPT_FS) || defined(CONFIG_UFS_FMP_ECRYPT_FS)
+#define RA_CLEAR	0
+#define RA_RESTORE	1
+#define FMPINFO_CLEAR	0
+#define FMPINFO_SET	1
+#endif
 #ifdef CONFIG_SDP
 #define PKG_NAME_SIZE 16
 #endif
@@ -260,7 +266,11 @@ struct ecryptfs_crypt_stat {
 #ifdef CONFIG_SDP
 #define ECRYPTFS_DEK_SDP_ENABLED      0x00100000
 #define ECRYPTFS_DEK_IS_SENSITIVE     0x00200000
+#define ECRYPTFS_DEK_MULTI_ENGINE     0x00400000 // eCryptfs header contains engine id.
 #define ECRYPTFS_SDP_IS_CHAMBER_DIR   0x02000000
+#endif
+#ifdef CONFIG_DLP
+#define ECRYPTFS_DLP_ENABLED		  0x04000000
 #endif
 
 	u32 flags;
@@ -284,7 +294,7 @@ struct ecryptfs_crypt_stat {
 	struct mutex cs_hash_tfm_mutex;
 	struct mutex cs_mutex;
 #ifdef CONFIG_SDP
-	int userid;
+	int engine_id;
 	dek_t sdp_dek;
 #endif
 };
@@ -297,9 +307,6 @@ struct ecryptfs_inode_info {
 	atomic_t lower_file_count;
 	struct file *lower_file;
 	struct ecryptfs_crypt_stat crypt_stat;
-#ifdef CONFIG_SDP
-	int userid;
-#endif
 };
 
 /* dentry private data. Each dentry must keep track of a lower
@@ -393,6 +400,9 @@ struct ecryptfs_mount_crypt_stat {
 #ifdef CONFIG_SDP
 #define ECRYPTFS_MOUNT_SDP_ENABLED             0x80000000
 #endif
+#ifdef CONFIG_DLP
+#define ECRYPTFS_MOUNT_DLP_ENABLED             0x40000000
+#endif
 
 	u32 flags;
 	struct list_head global_auth_tok_list;
@@ -418,6 +428,8 @@ struct ecryptfs_mount_crypt_stat {
 	int userid;
 	struct list_head chamber_dir_list;
 	spinlock_t chamber_dir_list_lock;
+
+	int partition_id;
 #endif
 
 };
@@ -778,21 +790,12 @@ int ecryptfs_write_lower_page_segment(struct inode *ecryptfs_inode,
 				      struct page *page_for_lower,
 				      size_t offset_in_page, size_t size);
 int ecryptfs_write(struct inode *inode, char *data, loff_t offset, size_t size);
-#if defined(CONFIG_MMC_DW_FMP_ECRYPT_FS) || defined(CONFIG_UFS_FMP_ECRYPT_FS)
-int ecryptfs_read_lower(char *data, loff_t offset, size_t size,
-			struct inode *ecryptfs_inode, unsigned int crypt);
-int ecryptfs_read_lower_page_segment(struct page *page_for_ecryptfs,
-				     pgoff_t page_index,
-				     size_t offset_in_page, size_t size,
-				     struct inode *ecryptfs_inode, unsigned int crypt);
-#else
 int ecryptfs_read_lower(char *data, loff_t offset, size_t size,
 			struct inode *ecryptfs_inode);
 int ecryptfs_read_lower_page_segment(struct page *page_for_ecryptfs,
 				     pgoff_t page_index,
 				     size_t offset_in_page, size_t size,
 				     struct inode *ecryptfs_inode);
-#endif
 struct page *ecryptfs_get_locked_page(struct inode *inode, loff_t index);
 int ecryptfs_parse_packet_length(unsigned char *data, size_t *size,
 				 size_t *length_size);
@@ -832,6 +835,10 @@ int ecryptfs_set_f_namelen(long *namelen, long lower_namelen,
 			   struct ecryptfs_mount_crypt_stat *mount_crypt_stat);
 int ecryptfs_derive_iv(char *iv, struct ecryptfs_crypt_stat *crypt_stat,
 		       loff_t offset);
+#if defined(CONFIG_MMC_DW_FMP_ECRYPT_FS) || defined(CONFIG_UFS_FMP_ECRYPT_FS)
+void ecryptfs_propagate_rapages(struct file *file, unsigned int crypt);
+int ecryptfs_propagate_fmpinfo(struct inode *inode, unsigned int flag);
+#endif
 
 #ifdef CONFIG_WTL_ENCRYPTION_FILTER
 extern int is_file_name_match(struct ecryptfs_mount_crypt_stat *mcs,

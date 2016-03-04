@@ -17,7 +17,7 @@ struct lcd_seq_info {
 #define UNDER_0(temperature)	(temperature <= 0)
 
 
-#define ACL_IS_ON(nit) 				(nit < 360)
+#define ACL_IS_ON(pb) 				(pb < 255)
 #define CAPS_IS_ON(nit)				(nit >= 41)
 
 #define NORMAL_TEMPERATURE			25	/* 25 degrees Celsius */
@@ -198,16 +198,11 @@ static const unsigned char SEQ_PENTILE_SETTING[] = {
 };
 
 static const unsigned char SEQ_POC_SETTING1[] = {
-	0xC3,
-	0xC0, 0x00, 0x33
-};
-
-static const unsigned char SEQ_POC_SETTING2[] = {
 	0xB0,
 	0x20
 };
 
-static const unsigned char SEQ_POC_SETTING3[] = {
+static const unsigned char SEQ_POC_SETTING2[] = {
 	0xFE,
 	0x04
 };
@@ -236,30 +231,50 @@ static const unsigned char SEQ_HBM_ON[] = {
 	0x53,
 	0xC0
 };
-static const unsigned char SEQ_ACL_OFF[] = {
+
+static const unsigned char S6E3HF2_SEQ_ACL_OFF[] = {
 	0x55,
 	0x00
 };
-
-static const unsigned char SEQ_ACL_8[] = {
+static const unsigned char S6E3HF2_SEQ_ACL_ON[] = {
 	0x55,
 	0x02,
 };
 
-static const unsigned char SEQ_ACL_OFF_OPR_AVR[] = {
+// parameter : 2nd : start 60% = 0x99, start 50% = 0x7F
+// parameter : 4nd : ACL 5%=0x06, 8%=0x09, 12%=0x0E, 15%=0x12
+static const unsigned char S6E3HF2_SEQ_ACL_OFF_OPR[] = {
 	0xB5,
-	0x40
+	0x40, 0x7F, 0x27, 0x0E
 };
 
-static const unsigned char SEQ_ACL_ON_OPR_AVR[] = {
+static const unsigned char S6E3HF2_SEQ_ACL_ON_OPR_5[] = {
 	0xB5,
-	0x50
+	0x50, 0x7F, 0x27, 0x06
+};
+
+static const unsigned char S6E3HF2_SEQ_ACL_ON_OPR_8[] = {
+	0xB5,
+	0x50, 0x7F, 0x27, 0x09
+};
+
+static const unsigned char S6E3HF2_SEQ_ACL_ON_OPR_12[] = {
+	0xB5,
+	0x50, 0x7F, 0x27, 0x0E
+};
+
+static const unsigned char S6E3HF2_SEQ_ACL_ON_OPR_15[] = {
+	0xB5,
+	0x50, 0x7F, 0x27, 0x12
 };
 
 static const unsigned char SEQ_WQXGA_PARTIAL_UPDATE[] = {
 	0x2A,
 	0x00, 0x00, 0x05, 0x9F,
 };
+
+#define ACL_OPR_LEN		ARRAY_SIZE(S6E3HF2_SEQ_ACL_ON_OPR_12)
+#define ACL_CMD_LEN		ARRAY_SIZE(S6E3HF2_SEQ_ACL_ON)
 
 enum {
 	HBM_STATUS_OFF,
@@ -268,17 +283,17 @@ enum {
 };
 
 enum {
-	ACL_STATUS_0P,
-	ACL_STATUS_8P,
+	ACL_STATUS_OFF,
+	ACL_STATUS_ON,
 	ACL_STATUS_MAX
 };
 
 enum {
-	ACL_OPR_16_FRAME,
-	ACL_OPR_32_FRAME,
+	ACL_OPR_OFF,
+	ACL_OPR_8P,
+	ACL_OPR_15P,
 	ACL_OPR_MAX
 };
-
 
 #if defined(CONFIG_SEC_FACTORY) && defined(CONFIG_EXYNOS_DECON_LCD_MCD)
 
@@ -391,5 +406,17 @@ static const unsigned char SEQ_GLOBAL_PARAM_21[] = {
 	0x15
 };
 #endif
+
+
+enum {
+	HBM_INTER_OFF = 0,
+	HBM_COLORBLIND_ON,
+	HBM_GALLERY_ON,
+};
+
+// 384 ~ 550
+static const char HBM_INTER_22TH_OFFSET[] = {
+	0x02, 0x04, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06
+};
 
 #endif /* __S6E3HF2_PARAM_H__ */

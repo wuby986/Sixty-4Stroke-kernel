@@ -379,6 +379,9 @@ void kernel_restart_prepare(char *cmd)
 {
 	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
 	system_state = SYSTEM_RESTART;
+
+	/* P150615-05396 : user process freeze before device shutdown */
+	freeze_processes();
 	usermodehelper_disable();
 	device_shutdown();
 }
@@ -464,6 +467,9 @@ static void kernel_shutdown_prepare(enum system_states state)
 	blocking_notifier_call_chain(&reboot_notifier_list,
 		(state == SYSTEM_HALT)?SYS_HALT:SYS_POWER_OFF, NULL);
 	system_state = state;
+
+	/* P150615-05396 : user process freeze before device shutdown */
+	freeze_processes();
 	usermodehelper_disable();
 	device_shutdown();
 }
@@ -491,6 +497,7 @@ EXPORT_SYMBOL_GPL(kernel_halt);
  */
 void kernel_power_off(void)
 {
+	printk(KERN_INFO "MDM_LOG - Kernel poweroff\n");
 	kernel_shutdown_prepare(SYSTEM_POWER_OFF);
 	if (pm_power_off_prepare)
 		pm_power_off_prepare();

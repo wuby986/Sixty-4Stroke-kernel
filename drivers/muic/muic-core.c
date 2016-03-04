@@ -88,7 +88,9 @@ static int muic_handle_dock_notification(struct notifier_block *nb,
 	switch (attached_dev) {
 	case ATTACHED_DEV_DESKDOCK_MUIC:
 	case ATTACHED_DEV_DESKDOCK_VB_MUIC:
+#if defined(CONFIG_SEC_FACTORY)
 	case ATTACHED_DEV_JIG_UART_ON_MUIC:
+#endif
 		if (action == MUIC_NOTIFY_CMD_ATTACH) {
 			type = MUIC_DOCK_DESKDOCK;
 			name = "Desk Dock Attach";
@@ -269,6 +271,18 @@ int get_switch_sel(void)
 	return muic_pdata.switch_sel;
 }
 
+static int afc_mode = 0;
+static int __init set_afc_mode(char *str)
+{
+	int mode;
+	get_option(&str, &mode);
+	afc_mode = (mode & 0x0000FF00) >> 8;
+	pr_info("%s: afc_mode is %d\n", __func__, afc_mode);
+
+	return 0;
+}
+early_param("charging_mode", set_afc_mode);
+
 bool is_muic_usb_path_ap_usb(void)
 {
 	if (MUIC_PATH_USB_AP == muic_pdata.usb_path) {
@@ -326,8 +340,9 @@ static int muic_init_gpio_cb(int switch_sel)
 
 	pdata->afc_disable = false;
 #if defined(CONFIG_HV_MUIC_MAX77843_AFC) || defined(CONFIG_HV_MUIC_MAX77833_AFC)
-	if (switch_sel & SWITCH_SEL_AFC_DISABLE_MASK)
+	if (afc_mode == CH_MODE_AFC_DISABLE_VAL)
 		pdata->afc_disable = true;
+
 	pr_info("%s afc_disable(%c)\n", __func__, (pdata->afc_disable ? 'T' : 'F'));
 #endif /* CONFIG_HV_MUIC_MAX77843_AFC */
 
